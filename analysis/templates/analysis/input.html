@@ -23,13 +23,6 @@
                     identification numbers, or other sensitive details.
                 </div>
 
-                {% if submitted %}
-                    <div class="alert alert-success" role="status">
-                        Your input passed validation. Analysis output is not implemented yet, and the submitted
-                        CV and job description text were not stored.
-                    </div>
-                {% endif %}
-
                 <form method="post" novalidate>
                     {% csrf_token %}
 
@@ -79,7 +72,7 @@
                         {% endif %}
                     </div>
 
-                    <button type="submit" class="btn btn-primary">Validate input</button>
+                    <button type="submit" class="btn btn-primary">View Prototype Results</button>
                 </form>
             </div>
         </div>
