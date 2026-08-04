@@ -24,7 +24,7 @@ class AnalysisInputForm(forms.Form):
             'required': 'Please paste the CV text before continuing.',
         },
     )
-    jd_text = forms.CharField(
+    job_description_text = forms.CharField(
         label='Job Description Text',
         required=True,
         widget=forms.Textarea(

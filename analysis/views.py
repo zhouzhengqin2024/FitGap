@@ -1,6 +1,7 @@
 from django.shortcuts import render
 
 from .forms import AnalysisInputForm
+from .services import extract_skills
 
 
 def _build_mock_results(output_language):
@@ -28,7 +29,12 @@ def input_view(request):
     form = AnalysisInputForm(request.POST or None)
 
     if request.method == 'POST' and form.is_valid():
+        cv_text = form.cleaned_data['cv_text']
+        job_description_text = form.cleaned_data['job_description_text']
         results = _build_mock_results(form.cleaned_data['output_language'])
+        results['cv_skills'] = extract_skills(cv_text)
+        results['job_description_skills'] = extract_skills(job_description_text)
+
         return render(
             request,
             'analysis/results.html',

@@ -47,11 +47,11 @@
                     </div>
 
                     <div class="mb-3">
-                        <label for="{{ form.jd_text.id_for_label }}" class="form-label">{{ form.jd_text.label }}</label>
-                        {{ form.jd_text }}
-                        {% if form.jd_text.errors %}
+                        <label for="{{ form.job_description_text.id_for_label }}" class="form-label">{{ form.job_description_text.label }}</label>
+                        {{ form.job_description_text }}
+                        {% if form.job_description_text.errors %}
                             <div class="invalid-feedback d-block">
-                                {% for error in form.jd_text.errors %}
+                                {% for error in form.job_description_text.errors %}
                                     <div>{{ error }}</div>
                                 {% endfor %}
                             </div>
