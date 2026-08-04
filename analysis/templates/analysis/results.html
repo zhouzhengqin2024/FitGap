@@ -19,11 +19,13 @@
 
                 <div class="alert alert-info" role="alert">
                     <strong>Prototype output:</strong>
-                    the current results are mock data and will later be replaced by rule-based analysis.
+                    match score and learning recommendations are mock data and will later be replaced by
+                    rule-based analysis.
                 </div>
 
                 <section class="mb-4">
                     <h2 class="h4">Extracted Skills</h2>
+                    <p class="text-muted">Real rule-based output from the submitted CV and job description text.</p>
                     <div class="row g-3">
                         <div class="col-12 col-md-6">
                             <h3 class="h6">Skills detected in CV</h3>
@@ -63,20 +65,30 @@
 
                 <section class="mb-4">
                     <h2 class="h4">Matched Skills</h2>
-                    <ul class="list-group">
-                        {% for skill in results.matched_skills %}
-                            <li class="list-group-item">{{ skill }}</li>
-                        {% endfor %}
-                    </ul>
+                    <p class="text-muted">Real rule-based output: skills found in both the CV and job description.</p>
+                    {% if results.matched_skills %}
+                        <ul class="list-group">
+                            {% for skill in results.matched_skills %}
+                                <li class="list-group-item">{{ skill }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="text-muted mb-0">No matched skills were found.</p>
+                    {% endif %}
                 </section>
 
                 <section class="mb-4">
                     <h2 class="h4">Missing Skills</h2>
-                    <ul class="list-group">
-                        {% for skill in results.missing_skills %}
-                            <li class="list-group-item">{{ skill }}</li>
-                        {% endfor %}
-                    </ul>
+                    <p class="text-muted">Real rule-based output: job description skills not found in the CV.</p>
+                    {% if results.missing_skills %}
+                        <ul class="list-group">
+                            {% for skill in results.missing_skills %}
+                                <li class="list-group-item">{{ skill }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="text-muted mb-0">No missing skills were found.</p>
+                    {% endif %}
                 </section>
 
                 <section class="mb-4">

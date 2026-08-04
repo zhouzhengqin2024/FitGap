@@ -37,3 +37,36 @@ def extract_skills(text):
                 break
 
     return extracted_skills
+
+
+def compare_skills(cv_skills, job_description_skills):
+    """Compare extracted CV and job description skills using exact case-insensitive matching."""
+    if not cv_skills or not job_description_skills:
+        return {
+            'matched_skills': [],
+            'missing_skills': [],
+        }
+
+    cv_skill_lookup = {skill.lower() for skill in cv_skills}
+    seen_job_description_skills = set()
+    matched_skills = []
+    missing_skills = []
+
+    for skill in job_description_skills:
+        normalised_skill = skill.lower()
+
+        # Keep the first JD occurrence only so each result skill appears once.
+        if normalised_skill in seen_job_description_skills:
+            continue
+
+        seen_job_description_skills.add(normalised_skill)
+
+        if normalised_skill in cv_skill_lookup:
+            matched_skills.append(skill)
+        else:
+            missing_skills.append(skill)
+
+    return {
+        'matched_skills': matched_skills,
+        'missing_skills': missing_skills,
+    }

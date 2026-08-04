@@ -1,7 +1,7 @@
 from django.shortcuts import render
 
 from .forms import AnalysisInputForm
-from .services import extract_skills
+from .services import compare_skills, extract_skills
 
 
 def _build_mock_results(output_language):
@@ -9,8 +9,6 @@ def _build_mock_results(output_language):
 
     return {
         'match_score': 65,
-        'matched_skills': ['Python', 'SQL', 'Git'],
-        'missing_skills': ['Django', 'REST APIs'],
         'learning_recommendations': [
             {
                 'skill': 'Django',
@@ -32,8 +30,13 @@ def input_view(request):
         cv_text = form.cleaned_data['cv_text']
         job_description_text = form.cleaned_data['job_description_text']
         results = _build_mock_results(form.cleaned_data['output_language'])
-        results['cv_skills'] = extract_skills(cv_text)
-        results['job_description_skills'] = extract_skills(job_description_text)
+        cv_skills = extract_skills(cv_text)
+        job_description_skills = extract_skills(job_description_text)
+        skill_comparison = compare_skills(cv_skills, job_description_skills)
+
+        results['cv_skills'] = cv_skills
+        results['job_description_skills'] = job_description_skills
+        results.update(skill_comparison)
 
         return render(
             request,
