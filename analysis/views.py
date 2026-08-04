@@ -1,7 +1,12 @@
 from django.shortcuts import render
 
 from .forms import AnalysisInputForm
-from .services import calculate_match_score, compare_skills, extract_skills
+from .services import (
+    calculate_match_score,
+    compare_skills,
+    extract_skills,
+    generate_learning_recommendations,
+)
 from .translations import get_translations, normalise_language
 
 
@@ -11,19 +16,9 @@ def _get_selected_language(request):
     return normalise_language(posted_language or query_language)
 
 
-def _build_mock_results(output_language, form, text):
+def _build_base_results(output_language, form):
     language_labels = dict(form.fields['output_language'].choices)
     return {
-        'learning_recommendations': [
-            {
-                'skill': 'Django',
-                'recommendation': text['recommendation_django'],
-            },
-            {
-                'skill': 'REST APIs',
-                'recommendation': text['recommendation_rest_apis'],
-            },
-        ],
         'output_language': language_labels.get(output_language, output_language),
     }
 
@@ -55,7 +50,7 @@ def input_view(request):
         job_description_text = form.cleaned_data['job_description_text']
         language = form.cleaned_data['output_language']
         text = get_translations(language)
-        results = _build_mock_results(language, form, text)
+        results = _build_base_results(language, form)
         cv_skills = extract_skills(cv_text)
         job_description_skills = extract_skills(job_description_text)
         skill_comparison = compare_skills(cv_skills, job_description_skills)
@@ -71,6 +66,10 @@ def input_view(request):
             text,
             results['matched_skills'],
             job_description_skills,
+        )
+        results['learning_recommendations'] = generate_learning_recommendations(
+            results['missing_skills'],
+            language,
         )
 
         return render(

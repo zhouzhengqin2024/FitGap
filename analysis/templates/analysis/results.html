@@ -99,14 +99,19 @@
 
                 <section class="mb-4">
                     <h2 class="h4">{{ text.learning_recommendations }}</h2>
-                    <div class="list-group">
-                        {% for item in results.learning_recommendations %}
-                            <div class="list-group-item">
-                                <h3 class="h6 mb-1">{{ item.skill }}</h3>
-                                <p class="mb-0">{{ item.recommendation }}</p>
-                            </div>
-                        {% endfor %}
-                    </div>
+                    <p class="text-muted">{{ text.learning_recommendations_notice }}</p>
+                    {% if results.learning_recommendations %}
+                        <div class="list-group">
+                            {% for item in results.learning_recommendations %}
+                                <div class="list-group-item">
+                                    <h3 class="h6 mb-1">{{ item.skill }}</h3>
+                                    <p class="mb-0">{{ item.recommendation }}</p>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted mb-0">{{ text.no_learning_recommendations }}</p>
+                    {% endif %}
                 </section>
 
                 <a href="{% url 'analysis:input' %}?lang={{ language }}" class="btn btn-primary">{{ text.run_another_analysis }}</a>
