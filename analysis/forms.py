@@ -1,9 +1,11 @@
 from django import forms
 
+from .translations import get_translations
+
 
 class AnalysisInputForm(forms.Form):
     LANGUAGE_ENGLISH = 'en'
-    LANGUAGE_SIMPLIFIED_CHINESE = 'zh-hans'
+    LANGUAGE_SIMPLIFIED_CHINESE = 'zh'
 
     OUTPUT_LANGUAGE_CHOICES = [
         (LANGUAGE_ENGLISH, 'English'),
@@ -39,8 +41,27 @@ class AnalysisInputForm(forms.Form):
         },
     )
     output_language = forms.ChoiceField(
-        label='Output Language',
         choices=OUTPUT_LANGUAGE_CHOICES,
         initial=LANGUAGE_ENGLISH,
         widget=forms.Select(attrs={'class': 'form-select'}),
     )
+
+    def __init__(self, *args, language=LANGUAGE_ENGLISH, **kwargs):
+        super().__init__(*args, **kwargs)
+        text = get_translations(language)
+
+        self.fields['cv_text'].label = text['cv_label']
+        self.fields['cv_text'].widget.attrs['placeholder'] = text['cv_placeholder']
+        self.fields['cv_text'].error_messages['required'] = text['cv_required']
+
+        self.fields['job_description_text'].label = text['job_description_label']
+        self.fields['job_description_text'].widget.attrs['placeholder'] = text['job_description_placeholder']
+        self.fields['job_description_text'].error_messages['required'] = text['job_description_required']
+
+        self.fields['output_language'].label = text['output_language_label']
+        self.fields['output_language'].choices = [
+            (self.LANGUAGE_ENGLISH, text['language_english_choice']),
+            (self.LANGUAGE_SIMPLIFIED_CHINESE, text['language_chinese_choice']),
+        ]
+        self.fields['output_language'].initial = language
+        self.fields['output_language'].error_messages['required'] = text['output_language_required']

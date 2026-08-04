@@ -149,3 +149,85 @@ class CompareSkillsTests(SimpleTestCase):
                 'missing_skills': ['Django', 'REST APIs', 'JavaScript'],
             },
         )
+
+
+class InterfaceLanguageTests(SimpleTestCase):
+    def test_english_input_page(self):
+        response = self.client.get('/?lang=en')
+
+        self.assertContains(response, 'CV and Job Description Input')
+        self.assertContains(response, 'Interface and Output Language')
+        self.assertContains(response, 'English interface and output')
+        self.assertContains(response, 'href="/?lang=zh"')
+
+    def test_chinese_input_page(self):
+        response = self.client.get('/?lang=zh')
+
+        self.assertContains(response, '简历和职位描述输入')
+        self.assertContains(response, '界面和输出语言')
+        self.assertContains(response, '简体中文界面和输出')
+        self.assertContains(response, 'href="/?lang=en"')
+
+    def test_english_results_page(self):
+        response = self.client.post('/?lang=en', data={
+            'cv_text': 'Python SQL Git',
+            'job_description_text': 'Python Django SQL',
+            'output_language': 'en',
+        })
+
+        self.assertContains(response, 'Prototype Analysis Results')
+        self.assertContains(response, 'Extracted Skills')
+        self.assertContains(response, 'Matched Skills')
+        self.assertContains(response, 'Python')
+        self.assertContains(response, 'Django')
+
+    def test_chinese_results_page(self):
+        response = self.client.post('/?lang=zh', data={
+            'cv_text': 'Python SQL Git',
+            'job_description_text': 'Python Django SQL',
+            'output_language': 'zh',
+        })
+
+        self.assertContains(response, '原型分析结果')
+        self.assertContains(response, '提取的技能')
+        self.assertContains(response, '匹配技能')
+        self.assertContains(response, 'Python')
+        self.assertContains(response, 'Django')
+        self.assertContains(response, '完成一个 Django 入门教程')
+
+    def test_language_preservation_after_post(self):
+        response = self.client.post('/?lang=en', data={
+            'cv_text': 'Python SQL',
+            'job_description_text': 'Python Django',
+            'output_language': 'zh',
+        })
+
+        self.assertContains(response, '原型分析结果')
+        self.assertContains(response, 'href="/?lang=zh"')
+
+    def test_chinese_required_field_validation_messages(self):
+        response = self.client.post('/?lang=zh', data={
+            'cv_text': '',
+            'job_description_text': '',
+            'output_language': 'zh',
+        })
+
+        self.assertContains(response, '请先粘贴简历文本再继续。')
+        self.assertContains(response, '请先粘贴职位描述文本再继续。')
+        self.assertContains(response, '简历和职位描述输入')
+
+    def test_invalid_language_falls_back_to_english(self):
+        response = self.client.get('/?lang=unsupported')
+
+        self.assertContains(response, 'CV and Job Description Input')
+        self.assertContains(response, 'View Prototype Results')
+
+    def test_run_another_analysis_preserves_selected_language(self):
+        response = self.client.post('/?lang=zh', data={
+            'cv_text': 'Python',
+            'job_description_text': 'Django',
+            'output_language': 'zh',
+        })
+
+        self.assertContains(response, 'href="/?lang=zh"')
+        self.assertContains(response, '再次分析')

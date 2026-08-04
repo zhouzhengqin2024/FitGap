@@ -1,29 +1,31 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ text.html_lang }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>CV and Job Description Input</title>
+    <title>{{ text.input_page_title }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
     <main class="container py-4 py-md-5">
         <div class="row justify-content-center">
             <div class="col-12 col-lg-10 col-xl-8">
+                <nav class="mb-4" aria-label="Language selection">
+                    <a href="{% url 'analysis:input' %}?lang=en" class="me-3">English</a>
+                    <a href="{% url 'analysis:input' %}?lang=zh">简体中文</a>
+                </nav>
+
                 <div class="mb-4">
-                    <h1 class="h2 mb-2">CV and Job Description Input</h1>
-                    <p class="text-muted mb-0">
-                        Paste the source text you want the prototype to use in a later analysis step.
-                    </p>
+                    <h1 class="h2 mb-2">{{ text.input_page_title }}</h1>
+                    <p class="text-muted mb-0">{{ text.input_intro }}</p>
                 </div>
 
                 <div class="alert alert-warning" role="alert">
-                    <strong>Privacy notice:</strong>
-                    Do not include unnecessary personal identifiers such as full addresses, phone numbers,
-                    identification numbers, or other sensitive details.
+                    <strong>{{ text.privacy_title }}</strong>
+                    {{ text.privacy_notice }}
                 </div>
 
-                <form method="post" novalidate>
+                <form method="post" action="{% url 'analysis:input' %}?lang={{ language }}" novalidate>
                     {% csrf_token %}
 
                     {% if form.non_field_errors %}
@@ -72,7 +74,7 @@
                         {% endif %}
                     </div>
 
-                    <button type="submit" class="btn btn-primary">View Prototype Results</button>
+                    <button type="submit" class="btn btn-primary">{{ text.submit_button }}</button>
                 </form>
             </div>
         </div>
