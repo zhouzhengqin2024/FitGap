@@ -1,6 +1,6 @@
 from django.test import SimpleTestCase
 
-from .services import compare_skills, extract_skills
+from .services import calculate_match_score, compare_skills, extract_skills
 
 
 class ExtractSkillsTests(SimpleTestCase):
@@ -151,6 +151,32 @@ class CompareSkillsTests(SimpleTestCase):
         )
 
 
+class CalculateMatchScoreTests(SimpleTestCase):
+    def test_full_match_returns_100(self):
+        self.assertEqual(calculate_match_score(['Python', 'SQL'], ['Python', 'SQL']), 100)
+
+    def test_partial_match_returns_correctly_rounded_percentage(self):
+        self.assertEqual(calculate_match_score(['Python', 'SQL'], ['Python', 'SQL', 'Git']), 67)
+
+    def test_no_match_returns_0(self):
+        self.assertEqual(calculate_match_score([], ['Python', 'SQL']), 0)
+
+    def test_empty_job_description_skills_returns_0(self):
+        self.assertEqual(calculate_match_score(['Python'], []), 0)
+
+    def test_duplicate_skills_do_not_inflate_score(self):
+        self.assertEqual(
+            calculate_match_score(['Python', 'Python', 'SQL'], ['Python', 'Python', 'SQL', 'Git']),
+            67,
+        )
+
+    def test_case_insensitive_skill_handling(self):
+        self.assertEqual(calculate_match_score(['python', 'SQL'], ['Python', 'sql']), 100)
+
+    def test_matched_skill_not_in_job_description_is_not_counted(self):
+        self.assertEqual(calculate_match_score(['Python', 'Django'], ['Python', 'SQL']), 50)
+
+
 class InterfaceLanguageTests(SimpleTestCase):
     def test_english_input_page(self):
         response = self.client.get('/?lang=en')
@@ -178,6 +204,8 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'Prototype Analysis Results')
         self.assertContains(response, 'Extracted Skills')
         self.assertContains(response, 'Matched Skills')
+        self.assertContains(response, '67%')
+        self.assertContains(response, '2 of 3 recognised job-description skills were found in the CV.')
         self.assertContains(response, 'Python')
         self.assertContains(response, 'Django')
 
@@ -191,9 +219,31 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '原型分析结果')
         self.assertContains(response, '提取的技能')
         self.assertContains(response, '匹配技能')
+        self.assertContains(response, '67%')
+        self.assertContains(response, '岗位描述中识别出的3项技能里，有2项在简历中被找到。')
         self.assertContains(response, 'Python')
         self.assertContains(response, 'Django')
         self.assertContains(response, '完成一个 Django 入门教程')
+
+    def test_english_zero_job_description_skill_explanation(self):
+        response = self.client.post('/?lang=en', data={
+            'cv_text': 'Python SQL',
+            'job_description_text': 'communication teamwork',
+            'output_language': 'en',
+        })
+
+        self.assertContains(response, '0%')
+        self.assertContains(response, 'No recognised job-description skills were found')
+
+    def test_chinese_zero_job_description_skill_explanation(self):
+        response = self.client.post('/?lang=zh', data={
+            'cv_text': 'Python SQL',
+            'job_description_text': 'communication teamwork',
+            'output_language': 'zh',
+        })
+
+        self.assertContains(response, '0%')
+        self.assertContains(response, '岗位描述中未识别出技能')
 
     def test_language_preservation_after_post(self):
         response = self.client.post('/?lang=en', data={

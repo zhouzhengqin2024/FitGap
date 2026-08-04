@@ -70,3 +70,17 @@ def compare_skills(cv_skills, job_description_skills):
         'matched_skills': matched_skills,
         'missing_skills': missing_skills,
     }
+
+
+def calculate_match_score(matched_skills, job_description_skills):
+    """Calculate the percentage of recognised job description skills found in the CV."""
+    unique_job_description_skills = {skill.lower() for skill in job_description_skills}
+
+    if not unique_job_description_skills:
+        return 0
+
+    unique_matched_skills = {skill.lower() for skill in matched_skills}
+    counted_matches = unique_matched_skills.intersection(unique_job_description_skills)
+    score = (len(counted_matches) / len(unique_job_description_skills)) * 100
+
+    return int(score + 0.5)
