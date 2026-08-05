@@ -2,6 +2,7 @@ from django.shortcuts import render
 
 from .forms import AnalysisInputForm
 from .services import (
+    build_skill_evidence_details,
     calculate_match_score,
     compare_skills,
     extract_skills,
@@ -71,6 +72,13 @@ def input_view(request):
             results['missing_skills'],
             language,
         )
+        results.update(build_skill_evidence_details(
+            results['matched_skills'],
+            results['missing_skills'],
+            cv_text,
+            job_description_text,
+            language,
+        ))
 
         return render(
             request,

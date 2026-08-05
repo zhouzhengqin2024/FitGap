@@ -73,11 +73,67 @@
                     <h2 class="h4">{{ text.matched_skills }}</h2>
                     <p class="text-muted">{{ text.matched_skills_notice }}</p>
                     {% if results.matched_skills %}
-                        <ul class="list-group">
-                            {% for skill in results.matched_skills %}
-                                <li class="list-group-item">{{ skill }}</li>
+                        <div class="list-group">
+                            {% for item in results.matched_skill_details %}
+                                <details class="list-group-item">
+                                    <summary class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                                        <span class="fw-semibold">{{ item.skill }}</span>
+                                        <span class="d-flex gap-2 align-items-center">
+                                            <span class="badge text-bg-success">{{ text.matched }}</span>
+                                            <span class="small text-muted">{{ text.view_explanation }}</span>
+                                        </span>
+                                    </summary>
+                                    <div class="row g-3 mt-1">
+                                        <div class="col-12 col-md-6">
+                                            <h3 class="h6">{{ text.evidence_from_cv }}</h3>
+                                            {% if item.cv_evidence %}
+                                                <ul class="mb-0">
+                                                    {% for evidence in item.cv_evidence %}
+                                                        <li>
+                                                            {% for part in evidence.highlight_parts %}
+                                                                {% if part.is_match %}<mark>{{ part.text }}</mark>{% else %}{{ part.text }}{% endif %}
+                                                            {% endfor %}
+                                                            {% if evidence.is_alias %}
+                                                                <div class="small text-muted">
+                                                                    <strong>{{ evidence.matched_term }}</strong> {{ text.recognised_as_alias_of }} <strong>{{ item.skill }}</strong>.
+                                                                </div>
+                                                            {% endif %}
+                                                        </li>
+                                                    {% endfor %}
+                                                </ul>
+                                            {% else %}
+                                                <p class="text-muted mb-0">{{ text.no_supporting_excerpt }}</p>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-12 col-md-6">
+                                            <h3 class="h6">{{ text.evidence_from_job_description }}</h3>
+                                            {% if item.jd_evidence %}
+                                                <ul class="mb-0">
+                                                    {% for evidence in item.jd_evidence %}
+                                                        <li>
+                                                            {% for part in evidence.highlight_parts %}
+                                                                {% if part.is_match %}<mark>{{ part.text }}</mark>{% else %}{{ part.text }}{% endif %}
+                                                            {% endfor %}
+                                                            {% if evidence.is_alias %}
+                                                                <div class="small text-muted">
+                                                                    <strong>{{ evidence.matched_term }}</strong> {{ text.recognised_as_alias_of }} <strong>{{ item.skill }}</strong>.
+                                                                </div>
+                                                            {% endif %}
+                                                        </li>
+                                                    {% endfor %}
+                                                </ul>
+                                            {% else %}
+                                                <p class="text-muted mb-0">{{ text.no_supporting_excerpt }}</p>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <h3 class="h6">{{ text.why_classified }}</h3>
+                                        <p class="mb-0">{{ item.explanation }}</p>
+                                    </div>
+                                </details>
                             {% endfor %}
-                        </ul>
+                        </div>
                     {% else %}
                         <p class="text-muted mb-0">{{ text.no_matched_skills }}</p>
                     {% endif %}
@@ -87,11 +143,50 @@
                     <h2 class="h4">{{ text.missing_skills }}</h2>
                     <p class="text-muted">{{ text.missing_skills_notice }}</p>
                     {% if results.missing_skills %}
-                        <ul class="list-group">
-                            {% for skill in results.missing_skills %}
-                                <li class="list-group-item">{{ skill }}</li>
+                        <div class="list-group">
+                            {% for item in results.missing_skill_details %}
+                                <details class="list-group-item">
+                                    <summary class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                                        <span class="fw-semibold">{{ item.skill }}</span>
+                                        <span class="d-flex gap-2 align-items-center">
+                                            <span class="badge text-bg-warning">{{ text.missing }}</span>
+                                            <span class="small text-muted">{{ text.view_explanation }}</span>
+                                        </span>
+                                    </summary>
+                                    <div class="row g-3 mt-1">
+                                        <div class="col-12 col-md-6">
+                                            <h3 class="h6">{{ text.evidence_from_cv }}</h3>
+                                            <p class="text-muted mb-0">{{ text.no_configured_cv_occurrence }}</p>
+                                        </div>
+                                        <div class="col-12 col-md-6">
+                                            <h3 class="h6">{{ text.evidence_from_job_description }}</h3>
+                                            {% if item.jd_evidence %}
+                                                <ul class="mb-0">
+                                                    {% for evidence in item.jd_evidence %}
+                                                        <li>
+                                                            {% for part in evidence.highlight_parts %}
+                                                                {% if part.is_match %}<mark>{{ part.text }}</mark>{% else %}{{ part.text }}{% endif %}
+                                                            {% endfor %}
+                                                            {% if evidence.is_alias %}
+                                                                <div class="small text-muted">
+                                                                    <strong>{{ evidence.matched_term }}</strong> {{ text.recognised_as_alias_of }} <strong>{{ item.skill }}</strong>.
+                                                                </div>
+                                                            {% endif %}
+                                                        </li>
+                                                    {% endfor %}
+                                                </ul>
+                                            {% else %}
+                                                <p class="text-muted mb-0">{{ text.no_supporting_excerpt }}</p>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <h3 class="h6">{{ text.why_classified }}</h3>
+                                        <p class="mb-0">{{ item.explanation }}</p>
+                                    </div>
+                                </details>
                             {% endfor %}
-                        </ul>
+                        </div>
                     {% else %}
                         <p class="text-muted mb-0">{{ text.no_missing_skills }}</p>
                     {% endif %}

@@ -67,11 +67,59 @@ GENERIC_RECOMMENDATION = {
     'zh': '复习该技能的基础知识，完成一个结构化教程，并在一个小型实践项目中应用。',
 }
 
+MAX_EVIDENCE_EXCERPTS = 2
+
+CLASSIFICATION_EXPLANATIONS = {
+    'en': {
+        'matched': '{skill} was classified as matched because a configured term or alias was found in both the CV and the job description.',
+        'missing': (
+            '{skill} was recognised in the job description, but no configured canonical term or alias for '
+            '{skill} was found in the CV.'
+        ),
+    },
+    'zh': {
+        'matched': '{skill} 被归类为匹配技能，因为简历和职位描述中都找到了已配置的术语或别名。',
+        'missing': '{skill} 在职位描述中被识别出，但简历中未找到 {skill} 的已配置规范术语或别名。',
+    },
+}
+
 
 def _build_alias_pattern(alias):
     escaped_alias = re.escape(alias)
     flexible_spaces = escaped_alias.replace(r'\ ', r'\s+')
     return rf'(?<![A-Za-z0-9]){flexible_spaces}(?![A-Za-z0-9])'
+
+
+def _get_aliases_for_skill(skill):
+    for canonical_skill, aliases in SKILL_CATALOGUE:
+        if canonical_skill.lower() == skill.lower():
+            return aliases
+    return [skill]
+
+
+def _normalise_language(language):
+    return language if language in {'en', 'zh'} else 'en'
+
+
+def _split_evidence_fragments(text):
+    if not text:
+        return []
+
+    fragments = []
+
+    for line in text.splitlines():
+        stripped_line = line.strip()
+
+        if not stripped_line:
+            continue
+
+        fragments.extend(
+            fragment.strip()
+            for fragment in re.split(r'(?<=[.!?。！？])\s+', stripped_line)
+            if fragment.strip()
+        )
+
+    return fragments
 
 
 def extract_skills(text):
@@ -89,6 +137,82 @@ def extract_skills(text):
                 break
 
     return extracted_skills
+
+
+def extract_skill_evidence(text, skill, max_excerpts=MAX_EVIDENCE_EXCERPTS):
+    """Return original text excerpts that support a recognised skill match."""
+    return [
+        occurrence['excerpt']
+        for occurrence in extract_skill_evidence_occurrences(text, skill, max_excerpts)
+    ]
+
+
+def _build_highlight_parts(excerpt, start, end):
+    return [
+        {'text': excerpt[:start], 'is_match': False},
+        {'text': excerpt[start:end], 'is_match': True},
+        {'text': excerpt[end:], 'is_match': False},
+    ]
+
+
+def extract_skill_evidence_occurrences(text, skill, max_excerpts=MAX_EVIDENCE_EXCERPTS):
+    """Return structured evidence occurrences for a recognised skill match."""
+    occurrences = []
+    seen_excerpts = set()
+
+    for fragment in _split_evidence_fragments(text):
+        for alias in _get_aliases_for_skill(skill):
+            match = re.search(_build_alias_pattern(alias), fragment, flags=re.IGNORECASE)
+
+            if match:
+                normalised_fragment = re.sub(r'\s+', ' ', fragment).lower()
+
+                if normalised_fragment not in seen_excerpts:
+                    seen_excerpts.add(normalised_fragment)
+                    matched_term = match.group(0)
+                    occurrences.append({
+                        'excerpt': fragment,
+                        'matched_term': matched_term,
+                        'is_alias': alias.lower() != skill.lower(),
+                        'highlight_parts': _build_highlight_parts(fragment, match.start(), match.end()),
+                    })
+
+                break
+
+        if len(occurrences) >= max_excerpts:
+            break
+
+    return occurrences
+
+
+def build_skill_evidence_details(matched_skills, missing_skills, cv_text, job_description_text, language='en'):
+    """Build structured CV and job description evidence for matched and missing skills."""
+    selected_language = _normalise_language(language)
+    matched_skill_details = [
+        {
+            'skill': skill,
+            'status': 'matched',
+            'cv_evidence': extract_skill_evidence_occurrences(cv_text, skill),
+            'jd_evidence': extract_skill_evidence_occurrences(job_description_text, skill),
+            'explanation': CLASSIFICATION_EXPLANATIONS[selected_language]['matched'].format(skill=skill),
+        }
+        for skill in matched_skills
+    ]
+    missing_skill_details = [
+        {
+            'skill': skill,
+            'status': 'missing',
+            'cv_evidence': [],
+            'jd_evidence': extract_skill_evidence_occurrences(job_description_text, skill),
+            'explanation': CLASSIFICATION_EXPLANATIONS[selected_language]['missing'].format(skill=skill),
+        }
+        for skill in missing_skills
+    ]
+
+    return {
+        'matched_skill_details': matched_skill_details,
+        'missing_skill_details': missing_skill_details,
+    }
 
 
 def compare_skills(cv_skills, job_description_skills):
