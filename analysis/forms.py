@@ -12,6 +12,15 @@ class AnalysisInputForm(forms.Form):
         (LANGUAGE_SIMPLIFIED_CHINESE, 'Simplified Chinese'),
     ]
 
+    cv_file = forms.FileField(
+        required=False,
+        widget=forms.ClearableFileInput(
+            attrs={
+                'class': 'visually-hidden document-upload-input',
+                'accept': '.pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain',
+            }
+        ),
+    )
     cv_text = forms.CharField(
         label='CV Text',
         required=True,
@@ -25,6 +34,15 @@ class AnalysisInputForm(forms.Form):
         error_messages={
             'required': 'Please paste the CV text before continuing.',
         },
+    )
+    job_description_file = forms.FileField(
+        required=False,
+        widget=forms.ClearableFileInput(
+            attrs={
+                'class': 'visually-hidden document-upload-input',
+                'accept': '.pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain',
+            }
+        ),
     )
     job_description_text = forms.CharField(
         label='Job Description Text',
@@ -50,10 +68,14 @@ class AnalysisInputForm(forms.Form):
         super().__init__(*args, **kwargs)
         text = get_translations(language)
 
+        self.fields['cv_file'].label = text['cv_upload_label']
+        self.fields['cv_file'].help_text = text['supported_upload_formats']
         self.fields['cv_text'].label = text['cv_label']
         self.fields['cv_text'].widget.attrs['placeholder'] = text['cv_placeholder']
         self.fields['cv_text'].error_messages['required'] = text['cv_required']
 
+        self.fields['job_description_file'].label = text['job_description_upload_label']
+        self.fields['job_description_file'].help_text = text['supported_upload_formats']
         self.fields['job_description_text'].label = text['job_description_label']
         self.fields['job_description_text'].widget.attrs['placeholder'] = text['job_description_placeholder']
         self.fields['job_description_text'].error_messages['required'] = text['job_description_required']

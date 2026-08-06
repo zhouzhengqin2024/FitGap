@@ -1,5 +1,8 @@
+from django.http import JsonResponse
 from django.shortcuts import render
+from django.views.decorators.http import require_POST
 
+from .document_extraction import DocumentExtractionError, extract_document_text
 from .forms import AnalysisInputForm
 from .services import (
     build_skill_evidence_details,
@@ -39,6 +42,36 @@ def _build_match_score_explanation(text, matched_skills, job_description_skills)
         matched_count=matched_skill_count,
         job_description_count=job_description_skill_count,
     )
+
+
+def _get_extraction_error_message(text, code):
+    return text.get(f'{code}_error', text['extraction_failed_error'])
+
+
+@require_POST
+def extract_document_text_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+    uploaded_file = request.FILES.get('document')
+
+    if not uploaded_file:
+        return JsonResponse({
+            'success': False,
+            'error': text['upload_required'],
+        }, status=400)
+
+    try:
+        extracted_text = extract_document_text(uploaded_file)
+    except DocumentExtractionError as exc:
+        return JsonResponse({
+            'success': False,
+            'error': _get_extraction_error_message(text, exc.code),
+        }, status=400)
+
+    return JsonResponse({
+        'success': True,
+        'text': extracted_text,
+    })
 
 
 def input_view(request):

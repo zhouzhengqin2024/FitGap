@@ -1,5 +1,15 @@
-from django.test import SimpleTestCase
+import os
+from io import BytesIO
+from tempfile import TemporaryDirectory
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import SimpleTestCase
+from django.test.utils import override_settings
+from django.urls import reverse
+from docx import Document
+from pypdf import PdfWriter
+
+from .document_extraction import DocumentExtractionError, extract_document_text
 from .services import (
     build_skill_evidence_details,
     calculate_match_score,
@@ -9,6 +19,190 @@ from .services import (
     extract_skills,
     generate_learning_recommendations,
 )
+
+
+def _uploaded_file(name, content, content_type='application/octet-stream'):
+    return SimpleUploadedFile(name, content, content_type=content_type)
+
+
+def _docx_bytes(text):
+    buffer = BytesIO()
+    document = Document()
+    document.add_paragraph(text)
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _text_pdf_bytes(text):
+    stream = f'BT /F1 12 Tf 72 720 Td ({text}) Tj ET'
+    objects = [
+        '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n',
+        '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n',
+        '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n',
+        '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n',
+        f'5 0 obj << /Length {len(stream)} >> stream\n{stream}\nendstream endobj\n',
+    ]
+    pdf = '%PDF-1.4\n'
+    offsets = [0]
+
+    for obj in objects:
+        offsets.append(len(pdf.encode()))
+        pdf += obj
+
+    xref_offset = len(pdf.encode())
+    xref_entries = ['0000000000 65535 f \n'] + [
+        f'{offset:010d} 00000 n \n'
+        for offset in offsets[1:]
+    ]
+
+    pdf += 'xref\n0 6\n'
+    pdf += ''.join(xref_entries)
+    pdf += f'trailer << /Root 1 0 R /Size 6 >>\nstartxref\n{xref_offset}\n%%EOF\n'
+    return pdf.encode()
+
+
+def _blank_pdf_bytes():
+    buffer = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+class DocumentExtractionTests(SimpleTestCase):
+    def test_valid_txt_extraction(self):
+        uploaded_file = _uploaded_file('cv.txt', b'Python SQL Git')
+
+        self.assertEqual(extract_document_text(uploaded_file), 'Python SQL Git')
+
+    def test_valid_docx_extraction(self):
+        uploaded_file = _uploaded_file(
+            'cv.docx',
+            _docx_bytes('Python and Django experience.'),
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        )
+
+        self.assertEqual(extract_document_text(uploaded_file), 'Python and Django experience.')
+
+    def test_valid_text_based_pdf_extraction(self):
+        uploaded_file = _uploaded_file('cv.pdf', _text_pdf_bytes('Python Django SQL'), 'application/pdf')
+
+        self.assertIn('Python Django SQL', extract_document_text(uploaded_file))
+
+    def test_unsupported_extension_rejection(self):
+        uploaded_file = _uploaded_file('cv.png', b'not an accepted document')
+
+        with self.assertRaises(DocumentExtractionError) as context:
+            extract_document_text(uploaded_file)
+
+        self.assertEqual(context.exception.code, 'unsupported_file_type')
+
+    def test_oversized_file_rejection(self):
+        uploaded_file = _uploaded_file('cv.txt', b'x' * ((5 * 1024 * 1024) + 1))
+
+        with self.assertRaises(DocumentExtractionError) as context:
+            extract_document_text(uploaded_file)
+
+        self.assertEqual(context.exception.code, 'file_too_large')
+
+    def test_empty_file_rejection(self):
+        uploaded_file = _uploaded_file('cv.txt', b'')
+
+        with self.assertRaises(DocumentExtractionError) as context:
+            extract_document_text(uploaded_file)
+
+        self.assertEqual(context.exception.code, 'empty_file')
+
+    def test_corrupt_file_handling(self):
+        uploaded_file = _uploaded_file('cv.docx', b'not a real docx')
+
+        with self.assertRaises(DocumentExtractionError) as context:
+            extract_document_text(uploaded_file)
+
+        self.assertEqual(context.exception.code, 'corrupt_file')
+
+    def test_pdf_with_no_readable_text(self):
+        uploaded_file = _uploaded_file('blank.pdf', _blank_pdf_bytes(), 'application/pdf')
+
+        with self.assertRaises(DocumentExtractionError) as context:
+            extract_document_text(uploaded_file)
+
+        self.assertEqual(context.exception.code, 'no_readable_text')
+
+    def test_extracted_cv_text_enters_analysis_workflow(self):
+        extraction_response = self.client.post(
+            reverse('analysis:extract_document_text'),
+            {'document': _uploaded_file('cv.txt', b'Python SQL Git')},
+        )
+        extracted_text = extraction_response.json()['text']
+        response = self.client.post('/?lang=en', data={
+            'cv_text': extracted_text,
+            'job_description_text': 'Python SQL Django',
+            'output_language': 'en',
+        })
+
+        self.assertContains(response, '67%')
+        self.assertContains(response, 'Django')
+
+    def test_extracted_job_description_text_enters_analysis_workflow(self):
+        extraction_response = self.client.post(
+            reverse('analysis:extract_document_text'),
+            {'document': _uploaded_file('jd.txt', b'Python SQL Django')},
+        )
+        extracted_text = extraction_response.json()['text']
+        response = self.client.post('/?lang=en', data={
+            'cv_text': 'Python SQL Git',
+            'job_description_text': extracted_text,
+            'output_language': 'en',
+        })
+
+        self.assertContains(response, '67%')
+        self.assertContains(response, 'Complete a beginner Django tutorial')
+
+    def test_pasted_text_only_workflow_remains_valid(self):
+        response = self.client.post('/?lang=en', data={
+            'cv_text': 'Python SQL Git',
+            'job_description_text': 'Python SQL Django',
+            'output_language': 'en',
+        })
+
+        self.assertContains(response, 'Prototype Analysis Results')
+        self.assertContains(response, '67%')
+
+    def test_uploaded_files_are_not_persisted(self):
+        with TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                response = self.client.post(
+                    reverse('analysis:extract_document_text'),
+                    {'document': _uploaded_file('cv.txt', b'Python SQL')},
+                )
+
+                self.assertTrue(response.json()['success'])
+                self.assertEqual(os.listdir(media_root), [])
+
+    def test_extraction_errors_display_clearly(self):
+        response = self.client.post(
+            reverse('analysis:extract_document_text') + '?lang=en',
+            {'document': _uploaded_file('cv.png', b'not supported')},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()['error'],
+            'Unsupported file type. Please upload a PDF, DOCX or TXT file.',
+        )
+
+    def test_existing_extraction_endpoint_flow_remains_intact(self):
+        response = self.client.post(
+            reverse('analysis:extract_document_text') + '?lang=en',
+            {'document': _uploaded_file('cv.txt', b'Python from uploaded TXT')},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            'success': True,
+            'text': 'Python from uploaded TXT',
+        })
 
 
 class ExtractSkillsTests(SimpleTestCase):
@@ -367,6 +561,12 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'CV and Job Description Input')
         self.assertContains(response, 'Interface and Output Language')
         self.assertContains(response, 'English interface and output')
+        self.assertContains(response, 'Upload CV')
+        self.assertContains(response, 'Upload Job Description')
+        self.assertContains(response, 'Supported formats: PDF, DOCX and TXT')
+        self.assertContains(response, 'The extracted text can be reviewed and edited before analysis.')
+        self.assertContains(response, 'Choose file')
+        self.assertContains(response, 'No file selected')
         self.assertContains(response, 'href="/?lang=zh"')
 
     def test_chinese_input_page(self):
@@ -375,7 +575,35 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '简历和职位描述输入')
         self.assertContains(response, '界面和输出语言')
         self.assertContains(response, '简体中文界面和输出')
+        self.assertContains(response, '上传简历')
+        self.assertContains(response, '上传职位描述')
+        self.assertContains(response, '支持格式：PDF、DOCX 和 TXT')
+        self.assertContains(response, '分析前可以检查和修改提取的文本。')
+        self.assertContains(response, '选择文件')
+        self.assertContains(response, '未选择文件')
         self.assertContains(response, 'href="/?lang=en"')
+
+    def test_native_file_inputs_still_exist_and_are_visually_hidden(self):
+        response = self.client.get('/?lang=en')
+
+        self.assertContains(response, 'type="file"', count=2)
+        self.assertContains(response, 'name="cv_file"')
+        self.assertContains(response, 'name="job_description_file"')
+        self.assertContains(response, 'class="visually-hidden document-upload-input"', count=2)
+
+    def test_accepted_file_extensions_remain_unchanged(self):
+        response = self.client.get('/?lang=en')
+        accept_value = '.pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain'
+
+        self.assertContains(response, f'accept="{accept_value}"', count=2)
+
+    def test_cv_and_job_description_custom_controls_have_distinct_identifiers(self):
+        response = self.client.get('/?lang=en')
+
+        self.assertContains(response, 'id="id_cv_file_filename"')
+        self.assertContains(response, 'id="id_job_description_file_filename"')
+        self.assertContains(response, 'data-file-input="id_cv_file"')
+        self.assertContains(response, 'data-file-input="id_job_description_file"')
 
     def test_english_results_page(self):
         response = self.client.post('/?lang=en', data={
