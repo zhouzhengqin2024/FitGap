@@ -10,6 +10,14 @@ TRANSLATIONS = {
         'html_lang': 'en',
         'input_page_title': 'CV and Job Description Input',
         'input_intro': 'Paste the source text you want the prototype to use in a later analysis step.',
+        'language_switch_label': 'Language:',
+        'hero_product_label': 'AI Career Skill-Gap Assistant',
+        'hero_headline': 'See Your Skill Gaps. Learn What Matters Next.',
+        'hero_supporting_text': (
+            'Not sure how far you are from your target role or what to learn next? Upload your CV and a job '
+            'description to uncover your skill gaps, verify the evidence, and'
+        ),
+        'hero_value_statement': 'build the right skills faster to move closer to the job you want.',
         'privacy_title': 'Privacy notice:',
         'privacy_notice': (
             'Do not include unnecessary personal identifiers such as full addresses, phone numbers, '
@@ -94,6 +102,11 @@ TRANSLATIONS = {
         'html_lang': 'zh-Hans',
         'input_page_title': '简历和职位描述输入',
         'input_intro': '粘贴原始文本，供原型在后续分析步骤中使用。',
+        'language_switch_label': '语言：',
+        'hero_product_label': 'AI 求职技能差距助手',
+        'hero_headline': '看清技能差距，知道下一步该学什么。',
+        'hero_supporting_text': '不知道自己离目标岗位还有多远，也不知道下一步该学什么？上传简历和职位描述，快速识别技能差距、核实判断依据，',
+        'hero_value_statement': '更高效地补齐关键技能，向理想岗位更进一步。',
         'privacy_title': '隐私提示：',
         'privacy_notice': '请不要包含不必要的个人标识信息，例如完整地址、电话号码、身份证件号码或其他敏感信息。',
         'cv_label': '简历文本',

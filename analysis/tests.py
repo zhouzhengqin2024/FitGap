@@ -561,6 +561,23 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'CV and Job Description Input')
         self.assertContains(response, 'Interface and Output Language')
         self.assertContains(response, 'English interface and output')
+        self.assertContains(response, 'AI Career Skill-Gap Assistant')
+        self.assertContains(
+            response,
+            '<strong class="d-inline-block fs-5 mb-3 text-primary">AI Career Skill-Gap Assistant</strong>',
+            html=True,
+        )
+        self.assertContains(response, 'See Your Skill Gaps. Learn What Matters Next.')
+        self.assertContains(
+            response,
+            'Not sure how far you are from your target role or what to learn next? Upload your CV and a job description to uncover your skill gaps, verify the evidence, and',
+        )
+        self.assertContains(
+            response,
+            '<strong>build the right skills faster to move closer to the job you want.</strong>',
+            html=True,
+        )
+        self.assertContains(response, 'Language:')
         self.assertContains(response, 'Upload CV')
         self.assertContains(response, 'Upload Job Description')
         self.assertContains(response, 'Supported formats: PDF, DOCX and TXT')
@@ -575,6 +592,20 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '简历和职位描述输入')
         self.assertContains(response, '界面和输出语言')
         self.assertContains(response, '简体中文界面和输出')
+        self.assertContains(response, 'AI 求职技能差距助手')
+        self.assertContains(
+            response,
+            '<strong class="d-inline-block fs-5 mb-3 text-primary">AI 求职技能差距助手</strong>',
+            html=True,
+        )
+        self.assertContains(response, '看清技能差距，知道下一步该学什么。')
+        self.assertContains(response, '不知道自己离目标岗位还有多远，也不知道下一步该学什么？上传简历和职位描述，快速识别技能差距、核实判断依据，')
+        self.assertContains(
+            response,
+            '<strong>更高效地补齐关键技能，向理想岗位更进一步。</strong>',
+            html=True,
+        )
+        self.assertContains(response, '语言：')
         self.assertContains(response, '上传简历')
         self.assertContains(response, '上传职位描述')
         self.assertContains(response, '支持格式：PDF、DOCX 和 TXT')
@@ -604,6 +635,17 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'id="id_job_description_file_filename"')
         self.assertContains(response, 'data-file-input="id_cv_file"')
         self.assertContains(response, 'data-file-input="id_job_description_file"')
+
+    def test_existing_analysis_workflow_remains_intact_after_hero_addition(self):
+        response = self.client.post('/?lang=en', data={
+            'cv_text': 'Python SQL Git',
+            'job_description_text': 'Python SQL Django',
+            'output_language': 'en',
+        })
+
+        self.assertContains(response, 'Prototype Analysis Results')
+        self.assertContains(response, '67%')
+        self.assertContains(response, 'Complete a beginner Django tutorial and build a small CRUD web application.')
 
     def test_english_results_page(self):
         response = self.client.post('/?lang=en', data={
