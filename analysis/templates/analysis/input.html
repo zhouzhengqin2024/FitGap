@@ -1,3 +1,4 @@
+{% load static %}
 <!doctype html>
 <html lang="{{ text.html_lang }}">
 <head>
@@ -8,29 +9,34 @@
 </head>
 <body class="bg-light">
     <main class="container py-4 py-md-5">
+        <header class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center justify-content-between gap-3 mb-5 mx-auto" style="max-width: 1120px;">
+            <a class="d-inline-flex align-items-center" href="{% url 'analysis:input' %}?lang={{ language }}" aria-label="FitGap">
+                <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
+            </a>
+            <nav class="small" aria-label="Language selection">
+                <span class="text-muted me-2">{{ text.language_switch_label }}</span>
+                {% if language == 'en' %}
+                    <strong aria-current="page" class="text-dark">English</strong>
+                {% else %}
+                    <a href="{% url 'analysis:input' %}?lang=en">English</a>
+                {% endif %}
+                <span class="text-muted mx-2">|</span>
+                {% if language == 'zh' %}
+                    <strong aria-current="page" class="text-dark">简体中文</strong>
+                {% else %}
+                    <a href="{% url 'analysis:input' %}?lang=zh">简体中文</a>
+                {% endif %}
+            </nav>
+        </header>
+
         <div class="row justify-content-center">
             <div class="col-12 col-lg-10 col-xl-8">
-                <nav class="mb-4 small" aria-label="Language selection">
-                    <span class="text-muted me-2">{{ text.language_switch_label }}</span>
-                    {% if language == 'en' %}
-                        <strong aria-current="page" class="text-dark">English</strong>
-                    {% else %}
-                        <a href="{% url 'analysis:input' %}?lang=en">English</a>
-                    {% endif %}
-                    <span class="text-muted mx-2">|</span>
-                    {% if language == 'zh' %}
-                        <strong aria-current="page" class="text-dark">简体中文</strong>
-                    {% else %}
-                        <a href="{% url 'analysis:input' %}?lang=zh">简体中文</a>
-                    {% endif %}
-                </nav>
-
                 <section class="text-center mx-auto mb-5" style="max-width: 760px;" aria-labelledby="hero-heading">
-                    <strong class="d-inline-block fs-5 mb-3 text-primary">{{ text.hero_product_label }}</strong>
+                    <strong class="d-inline-block fs-5 fw-bold mb-3 text-dark">{{ text.hero_product_label }}</strong>
                     <h1 id="hero-heading" class="display-5 fw-bold mb-3">{{ text.hero_headline }}</h1>
                     <p class="lead text-secondary mb-0">
                         {{ text.hero_supporting_text }}
-                        <strong>{{ text.hero_value_statement }}</strong>
+                        <strong class="fitgap-blue-emphasis fw-bold" style="color: #1D63ED;">{{ text.hero_value_statement }}</strong>
                     </p>
                 </section>
 

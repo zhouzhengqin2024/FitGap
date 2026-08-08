@@ -1,8 +1,10 @@
 import os
 from io import BytesIO
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.contrib.staticfiles import finders
 from django.test import SimpleTestCase
 from django.test.utils import override_settings
 from django.urls import reverse
@@ -564,7 +566,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'AI Career Skill-Gap Assistant')
         self.assertContains(
             response,
-            '<strong class="d-inline-block fs-5 mb-3 text-primary">AI Career Skill-Gap Assistant</strong>',
+            '<strong class="d-inline-block fs-5 fw-bold mb-3 text-dark">AI Career Skill-Gap Assistant</strong>',
             html=True,
         )
         self.assertContains(response, 'See Your Skill Gaps. Learn What Matters Next.')
@@ -574,10 +576,11 @@ class InterfaceLanguageTests(SimpleTestCase):
         )
         self.assertContains(
             response,
-            '<strong>build the right skills faster to move closer to the job you want.</strong>',
+            '<strong class="fitgap-blue-emphasis fw-bold" style="color: #1D63ED;">build the right skills faster to move closer to the job you want.</strong>',
             html=True,
         )
         self.assertContains(response, 'Language:')
+        self.assertContains(response, '<strong aria-current="page" class="text-dark">English</strong>', html=True)
         self.assertContains(response, 'Upload CV')
         self.assertContains(response, 'Upload Job Description')
         self.assertContains(response, 'Supported formats: PDF, DOCX and TXT')
@@ -595,17 +598,18 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'AI 求职技能差距助手')
         self.assertContains(
             response,
-            '<strong class="d-inline-block fs-5 mb-3 text-primary">AI 求职技能差距助手</strong>',
+            '<strong class="d-inline-block fs-5 fw-bold mb-3 text-dark">AI 求职技能差距助手</strong>',
             html=True,
         )
         self.assertContains(response, '看清技能差距，知道下一步该学什么。')
         self.assertContains(response, '不知道自己离目标岗位还有多远，也不知道下一步该学什么？上传简历和职位描述，快速识别技能差距、核实判断依据，')
         self.assertContains(
             response,
-            '<strong>更高效地补齐关键技能，向理想岗位更进一步。</strong>',
+            '<strong class="fitgap-blue-emphasis fw-bold" style="color: #1D63ED;">更高效地补齐关键技能，向理想岗位更进一步。</strong>',
             html=True,
         )
         self.assertContains(response, '语言：')
+        self.assertContains(response, '<strong aria-current="page" class="text-dark">简体中文</strong>', html=True)
         self.assertContains(response, '上传简历')
         self.assertContains(response, '上传职位描述')
         self.assertContains(response, '支持格式：PDF、DOCX 和 TXT')
@@ -613,6 +617,44 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '选择文件')
         self.assertContains(response, '未选择文件')
         self.assertContains(response, 'href="/?lang=en"')
+
+    def test_fitgap_brand_logo_renders_from_static_asset(self):
+        response = self.client.get('/?lang=en')
+
+        self.assertContains(response, 'FitGap')
+        self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
+        self.assertContains(response, 'alt="FitGap - AI Skill-Gap Analysis"')
+        self.assertContains(response, 'aria-label="FitGap"')
+
+    def test_input_template_loads_static_template_tag(self):
+        template_source = Path('analysis/templates/analysis/input.html').read_text()
+
+        self.assertIn('{% load static %}', template_source)
+        self.assertIn("{% static 'analysis/fitgap-logo.svg' %}", template_source)
+
+    def test_fitgap_svg_static_asset_is_discoverable(self):
+        asset_path = finders.find('analysis/fitgap-logo.svg')
+
+        self.assertIsNotNone(asset_path)
+        self.assertTrue(asset_path.endswith('analysis/static/analysis/fitgap-logo.svg'))
+        content = Path(asset_path).read_text()
+        self.assertIn('<title id="fitgap-logo-title">FitGap</title>', content)
+
+    def test_textareas_still_render_on_input_page(self):
+        response = self.client.get('/?lang=en')
+
+        self.assertContains(response, 'name="cv_text"')
+        self.assertContains(response, 'name="job_description_text"')
+
+    def test_header_has_no_fake_navigation_links(self):
+        response = self.client.get('/?lang=en')
+
+        self.assertNotContains(response, 'Features')
+        self.assertNotContains(response, 'Pricing')
+        self.assertNotContains(response, 'Products')
+        self.assertNotContains(response, 'About')
+        self.assertNotContains(response, 'Login')
+        self.assertNotContains(response, 'Sign up')
 
     def test_native_file_inputs_still_exist_and_are_visually_hidden(self):
         response = self.client.get('/?lang=en')
