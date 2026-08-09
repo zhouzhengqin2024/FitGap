@@ -168,7 +168,7 @@ class DocumentExtractionTests(SimpleTestCase):
             'output_language': 'en',
         })
 
-        self.assertContains(response, 'Prototype Analysis Results')
+        self.assertContains(response, 'Analysis Results')
         self.assertContains(response, '67%')
 
     def test_uploaded_files_are_not_persisted(self):
@@ -569,7 +569,12 @@ class InterfaceLanguageTests(SimpleTestCase):
             '<strong class="d-inline-block fs-5 fw-bold mb-3 text-dark">AI Career Skill-Gap Assistant</strong>',
             html=True,
         )
-        self.assertContains(response, 'See Your Skill Gaps. Learn What Matters Next.')
+        self.assertContains(response, 'See Your Skill Gaps in Just Three Steps. Know What to Do Next.')
+        self.assertContains(
+            response,
+            '<h1 id="hero-heading" class="display-5 fw-bold mb-3 fitgap-blue-emphasis" style="color: #1D63ED;">See Your Skill Gaps in Just Three Steps. Know What to Do Next.</h1>',
+            html=True,
+        )
         self.assertContains(
             response,
             'Not sure how far you are from your target role or what to learn next? Upload your CV and a job description to uncover your skill gaps, verify the evidence, and',
@@ -581,12 +586,31 @@ class InterfaceLanguageTests(SimpleTestCase):
         )
         self.assertContains(response, 'Language:')
         self.assertContains(response, '<strong aria-current="page" class="text-dark">English</strong>', html=True)
+        self.assertContains(
+            response,
+            '<h3 class="workflow-step-heading fw-bold mb-3">Step 1 · Upload or paste your CV</h3>',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<h3 class="workflow-step-heading fw-bold mb-3">Step 2 · Add your target job description</h3>',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<h3 class="workflow-step-heading fw-bold mb-3">Step 3 · Choose your language and view your results</h3>',
+            html=True,
+        )
+        self.assertContains(response, 'font-size: clamp(1.75rem, 4vw, 2.5rem);')
         self.assertContains(response, 'Upload CV')
         self.assertContains(response, 'Upload Job Description')
         self.assertContains(response, 'Supported formats: PDF, DOCX and TXT')
         self.assertContains(response, 'The extracted text can be reviewed and edited before analysis.')
         self.assertContains(response, 'Choose file')
         self.assertContains(response, 'No file selected')
+        self.assertContains(response, 'View analysis results')
+        self.assertNotContains(response, 'View Prototype Results')
+        self.assertNotContains(response, 'prototype result')
         self.assertContains(response, 'href="/?lang=zh"')
 
     def test_chinese_input_page(self):
@@ -601,7 +625,12 @@ class InterfaceLanguageTests(SimpleTestCase):
             '<strong class="d-inline-block fs-5 fw-bold mb-3 text-dark">AI 求职技能差距助手</strong>',
             html=True,
         )
-        self.assertContains(response, '看清技能差距，知道下一步该学什么。')
+        self.assertContains(response, '看清技能差距，仅需三步，知道下一步怎么做。')
+        self.assertContains(
+            response,
+            '<h1 id="hero-heading" class="display-5 fw-bold mb-3 fitgap-blue-emphasis" style="color: #1D63ED;">看清技能差距，仅需三步，知道下一步怎么做。</h1>',
+            html=True,
+        )
         self.assertContains(response, '不知道自己离目标岗位还有多远，也不知道下一步该学什么？上传简历和职位描述，快速识别技能差距、核实判断依据，')
         self.assertContains(
             response,
@@ -610,12 +639,30 @@ class InterfaceLanguageTests(SimpleTestCase):
         )
         self.assertContains(response, '语言：')
         self.assertContains(response, '<strong aria-current="page" class="text-dark">简体中文</strong>', html=True)
+        self.assertContains(
+            response,
+            '<h3 class="workflow-step-heading fw-bold mb-3">第一步 · 上传或粘贴你的简历</h3>',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<h3 class="workflow-step-heading fw-bold mb-3">第二步 · 输入你的目标职位描述</h3>',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<h3 class="workflow-step-heading fw-bold mb-3">第三步 · 选择界面与输出语言，然后查看分析结果</h3>',
+            html=True,
+        )
+        self.assertContains(response, 'color: #1D63ED;')
         self.assertContains(response, '上传简历')
         self.assertContains(response, '上传职位描述')
         self.assertContains(response, '支持格式：PDF、DOCX 和 TXT')
         self.assertContains(response, '分析前可以检查和修改提取的文本。')
         self.assertContains(response, '选择文件')
         self.assertContains(response, '未选择文件')
+        self.assertContains(response, '查看分析结果')
+        self.assertNotContains(response, '查看原型结果')
         self.assertContains(response, 'href="/?lang=en"')
 
     def test_fitgap_brand_logo_renders_from_static_asset(self):
@@ -685,7 +732,7 @@ class InterfaceLanguageTests(SimpleTestCase):
             'output_language': 'en',
         })
 
-        self.assertContains(response, 'Prototype Analysis Results')
+        self.assertContains(response, 'Analysis Results')
         self.assertContains(response, '67%')
         self.assertContains(response, 'Complete a beginner Django tutorial and build a small CRUD web application.')
 
@@ -696,7 +743,7 @@ class InterfaceLanguageTests(SimpleTestCase):
             'output_language': 'en',
         })
 
-        self.assertContains(response, 'Prototype Analysis Results')
+        self.assertContains(response, 'Analysis Results')
         self.assertContains(response, 'Extracted Skills')
         self.assertContains(response, 'Matched Skills')
         self.assertContains(response, '67%')
@@ -739,7 +786,7 @@ class InterfaceLanguageTests(SimpleTestCase):
             'output_language': 'zh',
         })
 
-        self.assertContains(response, '原型分析结果')
+        self.assertContains(response, '分析结果')
         self.assertContains(response, '提取的技能')
         self.assertContains(response, '匹配技能')
         self.assertContains(response, '67%')
@@ -849,7 +896,7 @@ class InterfaceLanguageTests(SimpleTestCase):
             'output_language': 'zh',
         })
 
-        self.assertContains(response, '原型分析结果')
+        self.assertContains(response, '分析结果')
         self.assertContains(response, 'href="/?lang=zh"')
 
     def test_chinese_required_field_validation_messages(self):
@@ -867,7 +914,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         response = self.client.get('/?lang=unsupported')
 
         self.assertContains(response, 'CV and Job Description Input')
-        self.assertContains(response, 'View Prototype Results')
+        self.assertContains(response, 'View analysis results')
 
     def test_run_another_analysis_preserves_selected_language(self):
         response = self.client.post('/?lang=zh', data={
