@@ -1,0 +1,66 @@
+{% load static %}
+<!doctype html>
+<html lang="{{ text.html_lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ text.ai_recommended_next_steps }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <main class="container py-4 py-md-5">
+        <header class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center justify-content-between gap-3 mb-5 mx-auto" style="max-width: 1120px;">
+            <a class="d-inline-flex align-items-center" href="{% url 'analysis:input' %}?lang={{ language }}" aria-label="FitGap">
+                <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
+            </a>
+            <nav class="small d-flex gap-3 align-items-center" aria-label="Language selection">
+                <form method="post" action="{% url 'analysis:ai_results' %}?lang=en">
+                    {% csrf_token %}
+                    <input type="hidden" name="output_language" value="en">
+                    <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
+                    <button type="submit" class="btn btn-link btn-sm p-0{% if language == 'en' %} fw-bold text-dark{% endif %}"{% if language == 'en' %} aria-current="page"{% endif %}>English</button>
+                </form>
+                <form method="post" action="{% url 'analysis:ai_results' %}?lang=zh">
+                    {% csrf_token %}
+                    <input type="hidden" name="output_language" value="zh">
+                    <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
+                    <button type="submit" class="btn btn-link btn-sm p-0{% if language == 'zh' %} fw-bold text-dark{% endif %}"{% if language == 'zh' %} aria-current="page"{% endif %}>简体中文</button>
+                </form>
+            </nav>
+        </header>
+
+        <div class="row justify-content-center">
+            <div class="col-12 col-lg-10 col-xl-8">
+                <section class="mb-5 text-center mx-auto" style="max-width: 760px;" aria-labelledby="ai-results-heading">
+                    <h1 id="ai-results-heading" class="display-5 fw-bold mb-3" style="color: #1D63ED;">{{ text.ai_recommended_next_steps }}</h1>
+                    <p class="lead text-secondary mb-0">{{ text.ai_results_intro }}</p>
+                </section>
+
+                <section class="mb-4" aria-label="{{ text.ai_recommended_next_steps }}">
+                    <div class="list-group">
+                        {% for item in results.ai_prioritisation.priorities %}
+                            <article class="list-group-item p-4">
+                                <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+                                    <h2 class="h4 fw-bold mb-0">
+                                        {{ forloop.counter }} · {{ item.skill }}
+                                    </h2>
+                                    <span class="badge text-bg-primary">{{ item.priority_label }}</span>
+                                </div>
+                                <h3 class="h6">{{ text.ai_why_priority }}</h3>
+                                <p class="mb-0">{{ item.reason }}</p>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </section>
+
+                <form method="post" action="{% url 'analysis:full_analysis' %}?lang={{ language }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="output_language" value="{{ language }}">
+                    <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
+                    <button type="submit" class="btn btn-outline-primary">{{ text.back_to_full_analysis }}</button>
+                </form>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

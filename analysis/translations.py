@@ -96,10 +96,16 @@ TRANSLATIONS = {
         'no_missing_skills': 'No missing skills were found.',
         'ai_recommended_next_steps': 'AI Recommended Next Steps',
         'ai_prioritisation_intro': (
-            'Use AI to prioritise your verified skill gaps based on the job requirements and available evidence.'
+            'Use AI to prioritise your verified skill gaps based on the job requirements and supporting evidence.'
         ),
-        'ai_prioritise_button': 'Prioritise My Skill Gaps with AI',
+        'ai_prioritisation_value': 'Focus on the skill gaps that matter most and decide what to work on first.',
+        'ai_prioritise_button': '✨ Prioritise My Skill Gaps with AI →',
+        'ai_results_intro': (
+            'Based on your verified skill gaps and target job requirements, AI has identified the skills you should '
+            'prioritise first.'
+        ),
         'ai_why_priority': 'Why this is a priority',
+        'back_to_full_analysis': '← Back to Full Analysis',
         'ai_unavailable': (
             'AI prioritisation is temporarily unavailable. You can still review your verified skill gaps and evidence above.'
         ),
@@ -191,8 +197,11 @@ TRANSLATIONS = {
         'no_missing_skills': '未找到缺失技能。',
         'ai_recommended_next_steps': 'AI 推荐的下一步',
         'ai_prioritisation_intro': '使用 AI 根据职位要求和现有证据，对已识别的技能差距进行优先级排序。',
-        'ai_prioritise_button': 'AI 帮我确定优先级',
+        'ai_prioritisation_value': '找出最值得优先补齐的技能，明确下一步重点。',
+        'ai_prioritise_button': '✨ AI 帮我确定优先级 →',
+        'ai_results_intro': '基于已验证的技能差距和目标职位要求，AI 已为你识别最值得优先处理的技能。',
         'ai_why_priority': '为什么这是优先项',
+        'back_to_full_analysis': '← 返回完整分析结果',
         'ai_unavailable': 'AI 优先级分析暂时不可用，你仍可查看上方已识别的技能差距和证据。',
         'ai_no_missing_skills': '当前没有需要 AI 排序的缺失技能。',
         'ai_priority_high': '高优先级',

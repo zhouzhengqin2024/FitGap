@@ -54,10 +54,49 @@ def _sign_results(results):
     return signing.dumps(results, compress=True)
 
 
+def _apply_language_labels(results, language, text):
+    results['output_language'] = (
+        text['language_chinese_choice']
+        if language == 'zh'
+        else text['language_english_choice']
+    )
+
+    if results.get('job_description_skills') is not None and results.get('matched_skills') is not None:
+        results['match_score_explanation'] = _build_match_score_explanation(
+            text,
+            results['matched_skills'],
+            results['job_description_skills'],
+        )
+
+    ai_prioritisation = results.get('ai_prioritisation')
+
+    if ai_prioritisation and ai_prioritisation.get('status') == 'success':
+        _add_ai_priority_labels(ai_prioritisation.get('priorities', []), text)
+
+    return results
+
+
 def _render_results(request, language, results, text):
+    results = _apply_language_labels(results, language, text)
+
     return render(
         request,
         'analysis/results.html',
+        {
+            'analysis_payload': _sign_results(results),
+            'language': language,
+            'results': results,
+            'text': text,
+        },
+    )
+
+
+def _render_ai_results(request, language, results, text):
+    results = _apply_language_labels(results, language, text)
+
+    return render(
+        request,
+        'analysis/ai_results.html',
         {
             'analysis_payload': _sign_results(results),
             'language': language,
@@ -167,6 +206,35 @@ def input_view(request):
 
 
 @require_POST
+def full_analysis_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    try:
+        results = signing.loads(request.POST.get('analysis_payload', ''), max_age=3600)
+    except signing.BadSignature:
+        results = {}
+
+    return _render_results(request, language, results, text)
+
+
+@require_POST
+def ai_results_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    try:
+        results = signing.loads(request.POST.get('analysis_payload', ''), max_age=3600)
+    except signing.BadSignature:
+        results = {}
+
+    if results.get('ai_prioritisation', {}).get('status') == 'success':
+        return _render_ai_results(request, language, results, text)
+
+    return _render_results(request, language, results, text)
+
+
+@require_POST
 def ai_prioritise_view(request):
     language = _get_selected_language(request)
     text = get_translations(language)
@@ -192,5 +260,6 @@ def ai_prioritise_view(request):
             text,
             _add_ai_priority_labels(priorities, text),
         )
+        return _render_ai_results(request, language, results, text)
 
     return _render_results(request, language, results, text)

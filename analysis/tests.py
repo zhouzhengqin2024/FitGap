@@ -665,6 +665,18 @@ class InterfaceLanguageTests(SimpleTestCase):
             'output_language': language,
         })
 
+    def _switch_full_analysis_language(self, response, language):
+        return self.client.post(f'/results/full-analysis/?lang={language}', data={
+            'analysis_payload': response.context['analysis_payload'],
+            'output_language': language,
+        })
+
+    def _switch_ai_results_language(self, response, language):
+        return self.client.post(f'/results/ai-results/?lang={language}', data={
+            'analysis_payload': response.context['analysis_payload'],
+            'output_language': language,
+        })
+
     def test_english_input_page(self):
         response = self.client.get('/?lang=en')
 
@@ -781,6 +793,31 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'alt="FitGap - AI Skill-Gap Analysis"')
         self.assertContains(response, 'aria-label="FitGap"')
 
+    def test_results_page_renders_fitgap_logo_and_state_preserving_language_controls(self):
+        response = self._results_response('en')
+
+        self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
+        self.assertContains(response, 'alt="FitGap - AI Skill-Gap Analysis"')
+        self.assertContains(response, 'aria-label="FitGap"')
+        self.assertContains(response, 'action="/results/full-analysis/?lang=en"')
+        self.assertContains(response, 'action="/results/full-analysis/?lang=zh"')
+        self.assertContains(response, 'name="analysis_payload"')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_results_page_renders_fitgap_logo_and_state_preserving_language_controls(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        results_response = self._results_response('en')
+        response = self._post_ai_prioritisation(results_response, 'en')
+
+        self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
+        self.assertContains(response, 'alt="FitGap - AI Skill-Gap Analysis"')
+        self.assertContains(response, 'aria-label="FitGap"')
+        self.assertContains(response, 'action="/results/ai-results/?lang=en"')
+        self.assertContains(response, 'action="/results/ai-results/?lang=zh"')
+        self.assertContains(response, 'name="analysis_payload"')
+
     def test_input_template_loads_static_template_tag(self):
         template_source = Path('analysis/templates/analysis/input.html').read_text()
 
@@ -850,16 +887,58 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'AI Recommended Next Steps')
         self.assertContains(
             response,
-            'Use AI to prioritise your verified skill gaps based on the job requirements and available evidence.',
+            'Use AI to prioritise your verified skill gaps based on the job requirements and supporting evidence.',
         )
-        self.assertContains(response, 'Prioritise My Skill Gaps with AI')
+        self.assertContains(response, 'Focus on the skill gaps that matter most and decide what to work on first.')
+        self.assertContains(response, '✨ Prioritise My Skill Gaps with AI →')
+        self.assertContains(response, 'background: #F4F7FF; border: 1px solid #D7E3FF;')
+        self.assertContains(response, 'color: #1D63ED;')
         self.assertContains(response, 'action="/results/ai-prioritise/?lang=en"')
 
     def test_chinese_ai_button_renders_on_results_page(self):
         response = self._results_response('zh')
 
         self.assertContains(response, 'AI 推荐的下一步')
-        self.assertContains(response, 'AI 帮我确定优先级')
+        self.assertContains(response, '找出最值得优先补齐的技能，明确下一步重点。')
+        self.assertContains(response, '✨ AI 帮我确定优先级 →')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_results_page_english_to_chinese_language_switch_preserves_state(self, mock_prioritise):
+        response = self._results_response('en')
+        switched_response = self._switch_full_analysis_language(response, 'zh')
+
+        mock_prioritise.assert_not_called()
+        self.assertTemplateUsed(switched_response, 'analysis/results.html')
+        self.assertContains(switched_response, '分析结果')
+        self.assertContains(switched_response, '匹配技能')
+        self.assertContains(switched_response, '缺失技能')
+        self.assertContains(switched_response, 'Django')
+        self.assertContains(switched_response, 'REST APIs')
+        self.assertContains(switched_response, '40%')
+        self.assertContains(switched_response, 'action="/results/full-analysis/?lang=en"')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_results_page_chinese_to_english_language_switch_preserves_state(self, mock_prioritise):
+        response = self._results_response('zh')
+        switched_response = self._switch_full_analysis_language(response, 'en')
+
+        mock_prioritise.assert_not_called()
+        self.assertTemplateUsed(switched_response, 'analysis/results.html')
+        self.assertContains(switched_response, 'Analysis Results')
+        self.assertContains(switched_response, 'Matched Skills')
+        self.assertContains(switched_response, 'Missing Skills')
+        self.assertContains(switched_response, 'Django')
+        self.assertContains(switched_response, 'REST APIs')
+        self.assertContains(switched_response, '40%')
+
+    def test_results_page_language_switch_does_not_rerun_deterministic_analysis(self):
+        response = self._results_response('en')
+
+        with patch('analysis.views.extract_skills') as mock_extract_skills:
+            switched_response = self._switch_full_analysis_language(response, 'zh')
+
+        mock_extract_skills.assert_not_called()
+        self.assertContains(switched_response, '分析结果')
 
     @patch('analysis.views.prioritise_skill_gaps')
     def test_ai_api_is_not_called_when_normal_results_page_first_loads(self, mock_prioritise):
@@ -877,6 +956,7 @@ class InterfaceLanguageTests(SimpleTestCase):
 
         mock_prioritise.assert_called_once()
         self.assertContains(response, 'Django is required for backend work.')
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
 
     @patch('analysis.views.prioritise_skill_gaps')
     def test_verified_missing_skills_are_passed_to_ai_service(self, mock_prioritise):
@@ -901,11 +981,138 @@ class InterfaceLanguageTests(SimpleTestCase):
         results_response = self._results_response('en')
         response = self._post_ai_prioritisation(results_response, 'en')
 
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
         self.assertContains(response, 'HIGH PRIORITY')
         self.assertContains(response, 'MEDIUM PRIORITY')
         self.assertContains(response, 'Why this is a priority')
+        self.assertContains(response, '1 · Django')
+        self.assertContains(response, '2 · REST APIs')
         self.assertContains(response, 'Django is explicitly required for backend work.')
         self.assertContains(response, 'REST APIs support the service responsibilities.')
+        self.assertContains(response, '← Back to Full Analysis')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_successful_ai_result_is_not_rendered_inline_on_results_page(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required for backend work.'},
+        ]
+        results_response = self._results_response('en')
+        response = self._post_ai_prioritisation(results_response, 'en')
+
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertNotContains(results_response, 'Django is explicitly required for backend work.')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_chinese_ai_results_page_renders(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是核心后端框架要求。'},
+        ]
+        results_response = self._results_response('zh')
+        response = self._post_ai_prioritisation(results_response, 'zh')
+
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, 'AI 推荐的下一步')
+        self.assertContains(response, '基于已验证的技能差距和目标职位要求，AI 已为你识别最值得优先处理的技能。')
+        self.assertContains(response, '高优先级')
+        self.assertContains(response, '为什么这是优先项')
+        self.assertContains(response, '← 返回完整分析结果')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_results_english_to_chinese_language_switch_preserves_priority_data(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required for backend work.'},
+            {'skill': 'REST APIs', 'priority': 'medium', 'reason': 'REST APIs support service responsibilities.'},
+        ]
+        results_response = self._results_response('en')
+        ai_response = self._post_ai_prioritisation(results_response, 'en')
+        mock_prioritise.reset_mock()
+        switched_response = self._switch_ai_results_language(ai_response, 'zh')
+
+        mock_prioritise.assert_not_called()
+        self.assertTemplateUsed(switched_response, 'analysis/ai_results.html')
+        self.assertContains(switched_response, 'AI 推荐的下一步')
+        self.assertContains(switched_response, '基于已验证的技能差距和目标职位要求，AI 已为你识别最值得优先处理的技能。')
+        self.assertContains(switched_response, '高优先级')
+        self.assertContains(switched_response, '中优先级')
+        self.assertContains(switched_response, '为什么这是优先项')
+        self.assertContains(switched_response, '1 · Django')
+        self.assertContains(switched_response, '2 · REST APIs')
+        self.assertContains(switched_response, 'Django is explicitly required for backend work.')
+        self.assertContains(switched_response, '← 返回完整分析结果')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_results_chinese_to_english_language_switch_preserves_priority_data(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是核心后端框架要求。'},
+        ]
+        results_response = self._results_response('zh')
+        ai_response = self._post_ai_prioritisation(results_response, 'zh')
+        mock_prioritise.reset_mock()
+        switched_response = self._switch_ai_results_language(ai_response, 'en')
+
+        mock_prioritise.assert_not_called()
+        self.assertTemplateUsed(switched_response, 'analysis/ai_results.html')
+        self.assertContains(switched_response, 'AI Recommended Next Steps')
+        self.assertContains(
+            switched_response,
+            'Based on your verified skill gaps and target job requirements, AI has identified the skills you should prioritise first.',
+        )
+        self.assertContains(switched_response, 'HIGH PRIORITY')
+        self.assertContains(switched_response, 'Why this is a priority')
+        self.assertContains(switched_response, '1 · Django')
+        self.assertContains(switched_response, 'Django 是核心后端框架要求。')
+        self.assertContains(switched_response, '← Back to Full Analysis')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_results_language_switch_does_not_rerun_deterministic_analysis(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        results_response = self._results_response('en')
+        ai_response = self._post_ai_prioritisation(results_response, 'en')
+
+        with patch('analysis.views.extract_skills') as mock_extract_skills:
+            switched_response = self._switch_ai_results_language(ai_response, 'zh')
+
+        mock_extract_skills.assert_not_called()
+        self.assertContains(switched_response, 'AI 推荐的下一步')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_back_to_full_analysis_still_works_after_ai_language_switch(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        results_response = self._results_response('en')
+        ai_response = self._post_ai_prioritisation(results_response, 'en')
+        switched_ai_response = self._switch_ai_results_language(ai_response, 'zh')
+        response = self.client.post('/results/full-analysis/?lang=zh', data={
+            'analysis_payload': switched_ai_response.context['analysis_payload'],
+            'output_language': 'zh',
+        })
+
+        self.assertTemplateUsed(response, 'analysis/results.html')
+        self.assertContains(response, '分析结果')
+        self.assertContains(response, '匹配技能')
+        self.assertContains(response, '缺失技能')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_back_navigation_returns_to_full_analysis_without_ai_call(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required for backend work.'},
+        ]
+        results_response = self._results_response('en')
+        ai_response = self._post_ai_prioritisation(results_response, 'en')
+        mock_prioritise.reset_mock()
+        response = self.client.post('/results/full-analysis/?lang=en', data={
+            'analysis_payload': ai_response.context['analysis_payload'],
+            'output_language': 'en',
+        })
+
+        mock_prioritise.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/results.html')
+        self.assertContains(response, 'Analysis Results')
+        self.assertContains(response, 'Matched Skills')
+        self.assertContains(response, 'Missing Skills')
 
     @patch('analysis.views.prioritise_skill_gaps')
     def test_simulated_api_exception_triggers_english_fallback(self, mock_prioritise):
