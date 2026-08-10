@@ -94,6 +94,19 @@ TRANSLATIONS = {
         'missing_skills': 'Missing Skills',
         'missing_skills_notice': 'Real rule-based output: job description skills not found in the CV.',
         'no_missing_skills': 'No missing skills were found.',
+        'ai_recommended_next_steps': 'AI Recommended Next Steps',
+        'ai_prioritisation_intro': (
+            'Use AI to prioritise your verified skill gaps based on the job requirements and available evidence.'
+        ),
+        'ai_prioritise_button': 'Prioritise My Skill Gaps with AI',
+        'ai_why_priority': 'Why this is a priority',
+        'ai_unavailable': (
+            'AI prioritisation is temporarily unavailable. You can still review your verified skill gaps and evidence above.'
+        ),
+        'ai_no_missing_skills': 'No missing skills were identified for AI prioritisation.',
+        'ai_priority_high': 'HIGH PRIORITY',
+        'ai_priority_medium': 'MEDIUM PRIORITY',
+        'ai_priority_low': 'LOW PRIORITY',
         'learning_recommendations': 'Learning Recommendations',
         'learning_recommendations_notice': 'Real rule-based output: practical next steps for each missing skill.',
         'no_learning_recommendations': (
@@ -176,6 +189,15 @@ TRANSLATIONS = {
         'missing_skills': '缺失技能',
         'missing_skills_notice': '真实规则输出：职位描述中出现但简历中未出现的技能。',
         'no_missing_skills': '未找到缺失技能。',
+        'ai_recommended_next_steps': 'AI 推荐的下一步',
+        'ai_prioritisation_intro': '使用 AI 根据职位要求和现有证据，对已识别的技能差距进行优先级排序。',
+        'ai_prioritise_button': 'AI 帮我确定优先级',
+        'ai_why_priority': '为什么这是优先项',
+        'ai_unavailable': 'AI 优先级分析暂时不可用，你仍可查看上方已识别的技能差距和证据。',
+        'ai_no_missing_skills': '当前没有需要 AI 排序的缺失技能。',
+        'ai_priority_high': '高优先级',
+        'ai_priority_medium': '中优先级',
+        'ai_priority_low': '低优先级',
         'learning_recommendations': '学习建议',
         'learning_recommendations_notice': '真实规则输出：针对每项缺失技能的实用后续学习步骤。',
         'no_learning_recommendations': '没有需要生成的学习建议，因为未发现缺失的岗位技能。',

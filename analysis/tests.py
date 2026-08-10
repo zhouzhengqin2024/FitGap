@@ -2,6 +2,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.staticfiles import finders
@@ -12,6 +13,13 @@ from docx import Document
 from pypdf import PdfWriter
 
 from .document_extraction import DocumentExtractionError, extract_document_text
+from .ai_prioritisation import (
+    AIPrioritisationUnavailable,
+    GEMINI_MODEL,
+    build_ai_gap_input,
+    prioritise_skill_gaps,
+    validate_ai_priorities,
+)
 from .services import (
     build_skill_evidence_details,
     calculate_match_score,
@@ -556,7 +564,107 @@ class SkillEvidenceTests(SimpleTestCase):
         self.assertEqual(extract_skill_evidence('   \n\t', 'Python'), [])
 
 
+class AIPrioritisationServiceTests(SimpleTestCase):
+    def test_build_ai_gap_input_uses_verified_missing_skill_evidence_only(self):
+        gap_input = build_ai_gap_input([
+            {
+                'skill': 'Django',
+                'cv_evidence': [],
+                'jd_evidence': [{'excerpt': 'Django is required.'}],
+            },
+        ])
+
+        self.assertEqual(gap_input, [{
+            'skill': 'Django',
+            'jd_evidence': ['Django is required.'],
+            'cv_evidence': None,
+        }])
+
+    def test_validate_ai_priorities_rejects_more_than_three_results(self):
+        with self.assertRaises(AIPrioritisationUnavailable):
+            validate_ai_priorities({
+                'priorities': [
+                    {'skill': 'Django', 'priority': 'high', 'reason': 'Required for backend work.'},
+                    {'skill': 'REST APIs', 'priority': 'high', 'reason': 'Needed for API work.'},
+                    {'skill': 'JavaScript', 'priority': 'medium', 'reason': 'Useful for frontend tasks.'},
+                    {'skill': 'SQL', 'priority': 'low', 'reason': 'Mentioned less strongly.'},
+                ],
+            }, ['Django', 'REST APIs', 'JavaScript', 'SQL'])
+
+    def test_validate_ai_priorities_rejects_unverified_skill(self):
+        with self.assertRaises(AIPrioritisationUnavailable):
+            validate_ai_priorities({
+                'priorities': [
+                    {'skill': 'AWS', 'priority': 'high', 'reason': 'Invented by the model.'},
+                ],
+            }, ['Django'])
+
+    def test_validate_ai_priorities_rejects_duplicate_skills(self):
+        with self.assertRaises(AIPrioritisationUnavailable):
+            validate_ai_priorities({
+                'priorities': [
+                    {'skill': 'Django', 'priority': 'high', 'reason': 'Required.'},
+                    {'skill': 'django', 'priority': 'medium', 'reason': 'Duplicate.'},
+                ],
+            }, ['Django'])
+
+    def test_validate_ai_priorities_rejects_invalid_priority(self):
+        with self.assertRaises(AIPrioritisationUnavailable):
+            validate_ai_priorities({
+                'priorities': [
+                    {'skill': 'Django', 'priority': 'urgent', 'reason': 'Invalid label.'},
+                ],
+            }, ['Django'])
+
+    def test_validate_ai_priorities_rejects_malformed_response(self):
+        with self.assertRaises(AIPrioritisationUnavailable):
+            validate_ai_priorities({'items': []}, ['Django'])
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_missing_gemini_api_key_triggers_fallback_exception(self):
+        with self.assertRaises(AIPrioritisationUnavailable):
+            prioritise_skill_gaps([{'skill': 'Django', 'jd_evidence': [], 'cv_evidence': []}], 'en')
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.genai')
+    def test_gemini_generate_content_is_called_with_structured_output(self, mock_genai):
+        class FakeResponse:
+            text = '{"priorities":[{"skill":"Django","priority":"high","reason":"Django is required."}]}'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.return_value = FakeResponse()
+
+        result = prioritise_skill_gaps([
+            {
+                'skill': 'Django',
+                'cv_evidence': [],
+                'jd_evidence': [{'excerpt': 'Django is required.'}],
+            },
+        ], 'en')
+
+        mock_genai.Client.assert_called_once_with(api_key='test-key')
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        self.assertEqual(call_kwargs['model'], GEMINI_MODEL)
+        self.assertEqual(call_kwargs['config']['response_mime_type'], 'application/json')
+        self.assertIn('response_json_schema', call_kwargs['config'])
+        self.assertIn('Django is required.', call_kwargs['contents'])
+        self.assertEqual(result[0]['skill'], 'Django')
+
+
 class InterfaceLanguageTests(SimpleTestCase):
+    def _results_response(self, language='en', cv_text='Python SQL Git', job_description_text='Python SQL Django REST APIs JavaScript'):
+        return self.client.post(f'/?lang={language}', data={
+            'cv_text': cv_text,
+            'job_description_text': job_description_text,
+            'output_language': language,
+        })
+
+    def _post_ai_prioritisation(self, results_response, language='en'):
+        return self.client.post(f'/results/ai-prioritise/?lang={language}', data={
+            'analysis_payload': results_response.context['analysis_payload'],
+            'output_language': language,
+        })
+
     def test_english_input_page(self):
         response = self.client.get('/?lang=en')
 
@@ -735,6 +843,117 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'Analysis Results')
         self.assertContains(response, '67%')
         self.assertContains(response, 'Complete a beginner Django tutorial and build a small CRUD web application.')
+
+    def test_ai_section_and_english_button_render_on_results_page(self):
+        response = self._results_response('en')
+
+        self.assertContains(response, 'AI Recommended Next Steps')
+        self.assertContains(
+            response,
+            'Use AI to prioritise your verified skill gaps based on the job requirements and available evidence.',
+        )
+        self.assertContains(response, 'Prioritise My Skill Gaps with AI')
+        self.assertContains(response, 'action="/results/ai-prioritise/?lang=en"')
+
+    def test_chinese_ai_button_renders_on_results_page(self):
+        response = self._results_response('zh')
+
+        self.assertContains(response, 'AI 推荐的下一步')
+        self.assertContains(response, 'AI 帮我确定优先级')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_api_is_not_called_when_normal_results_page_first_loads(self, mock_prioritise):
+        self._results_response('en')
+
+        mock_prioritise.assert_not_called()
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_api_is_called_only_after_dedicated_post(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is required for backend work.'},
+        ]
+        results_response = self._results_response('en')
+        response = self._post_ai_prioritisation(results_response, 'en')
+
+        mock_prioritise.assert_called_once()
+        self.assertContains(response, 'Django is required for backend work.')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_verified_missing_skills_are_passed_to_ai_service(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        results_response = self._results_response('en')
+
+        self._post_ai_prioritisation(results_response, 'en')
+
+        missing_skill_details = mock_prioritise.call_args.args[0]
+        self.assertEqual([item['skill'] for item in missing_skill_details], ['Django', 'REST APIs', 'JavaScript'])
+        self.assertEqual(missing_skill_details[0]['cv_evidence'], [])
+        self.assertIn('Django', missing_skill_details[0]['jd_evidence'][0]['excerpt'])
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_successful_structured_ai_result_displays_correctly(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required for backend work.'},
+            {'skill': 'REST APIs', 'priority': 'medium', 'reason': 'REST APIs support the service responsibilities.'},
+        ]
+        results_response = self._results_response('en')
+        response = self._post_ai_prioritisation(results_response, 'en')
+
+        self.assertContains(response, 'HIGH PRIORITY')
+        self.assertContains(response, 'MEDIUM PRIORITY')
+        self.assertContains(response, 'Why this is a priority')
+        self.assertContains(response, 'Django is explicitly required for backend work.')
+        self.assertContains(response, 'REST APIs support the service responsibilities.')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_simulated_api_exception_triggers_english_fallback(self, mock_prioritise):
+        mock_prioritise.side_effect = AIPrioritisationUnavailable
+        results_response = self._results_response('en')
+        response = self._post_ai_prioritisation(results_response, 'en')
+
+        self.assertContains(
+            response,
+            'AI prioritisation is temporarily unavailable. You can still review your verified skill gaps and evidence above.',
+        )
+        self.assertContains(response, 'Matched Skills')
+        self.assertContains(response, 'Missing Skills')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_simulated_api_exception_triggers_chinese_fallback(self, mock_prioritise):
+        mock_prioritise.side_effect = AIPrioritisationUnavailable
+        results_response = self._results_response('zh')
+        response = self._post_ai_prioritisation(results_response, 'zh')
+
+        self.assertContains(response, 'AI 优先级分析暂时不可用，你仍可查看上方已识别的技能差距和证据。')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_zero_missing_skills_does_not_call_ai_api(self, mock_prioritise):
+        results_response = self._results_response(
+            'en',
+            cv_text='Python SQL Django',
+            job_description_text='Python SQL Django',
+        )
+        response = self._post_ai_prioritisation(results_response, 'en')
+
+        mock_prioritise.assert_not_called()
+        self.assertContains(response, 'No missing skills were identified for AI prioritisation.')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_one_or_two_missing_skills_are_handled(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is the only verified gap.'},
+        ]
+        results_response = self._results_response(
+            'en',
+            cv_text='Python SQL',
+            job_description_text='Python SQL Django',
+        )
+        response = self._post_ai_prioritisation(results_response, 'en')
+
+        mock_prioritise.assert_called_once()
+        self.assertContains(response, 'Django is the only verified gap.')
 
     def test_english_results_page(self):
         response = self.client.post('/?lang=en', data={

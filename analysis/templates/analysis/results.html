@@ -193,6 +193,43 @@
                 </section>
 
                 <section class="mb-4">
+                    <h2 class="h4">{{ text.ai_recommended_next_steps }}</h2>
+                    <p class="text-muted">{{ text.ai_prioritisation_intro }}</p>
+
+                    {% if results.missing_skills %}
+                        <form method="post" action="{% url 'analysis:ai_prioritise' %}?lang={{ language }}" class="mb-3">
+                            {% csrf_token %}
+                            <input type="hidden" name="output_language" value="{{ language }}">
+                            <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
+                            <button type="submit" class="btn btn-primary">{{ text.ai_prioritise_button }}</button>
+                        </form>
+                    {% else %}
+                        <p class="text-muted">{{ text.ai_no_missing_skills }}</p>
+                    {% endif %}
+
+                    {% if results.ai_prioritisation %}
+                        {% if results.ai_prioritisation.status == 'success' %}
+                            <ol class="list-group list-group-numbered">
+                                {% for item in results.ai_prioritisation.priorities %}
+                                    <li class="list-group-item">
+                                        <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-2">
+                                            <h3 class="h6 mb-0">{{ item.skill }}</h3>
+                                            <span class="badge text-bg-primary">{{ item.priority_label }}</span>
+                                        </div>
+                                        <h4 class="h6">{{ text.ai_why_priority }}</h4>
+                                        <p class="mb-0">{{ item.reason }}</p>
+                                    </li>
+                                {% endfor %}
+                            </ol>
+                        {% else %}
+                            <div class="alert alert-warning mb-0" role="alert">
+                                {{ results.ai_prioritisation.message }}
+                            </div>
+                        {% endif %}
+                    {% endif %}
+                </section>
+
+                <section class="mb-4">
                     <h2 class="h4">{{ text.learning_recommendations }}</h2>
                     <p class="text-muted">{{ text.learning_recommendations_notice }}</p>
                     {% if results.learning_recommendations %}
