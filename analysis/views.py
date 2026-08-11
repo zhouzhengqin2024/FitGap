@@ -3,6 +3,7 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_POST
 
+from .ai_learning_roadmap import LearningRoadmapUnavailable, generate_learning_roadmap
 from .ai_prioritisation import AIPrioritisationUnavailable, prioritise_skill_gaps
 from .document_extraction import DocumentExtractionError, extract_document_text
 from .forms import AnalysisInputForm
@@ -73,6 +74,8 @@ def _apply_language_labels(results, language, text):
     if ai_prioritisation and ai_prioritisation.get('status') == 'success':
         _add_ai_priority_labels(ai_prioritisation.get('priorities', []), text)
 
+    _add_roadmap_labels(results.get('learning_roadmap'), text)
+
     return results
 
 
@@ -106,10 +109,36 @@ def _render_ai_results(request, language, results, text):
     )
 
 
+def _render_learning_roadmap(request, language, results, text):
+    results = _apply_language_labels(results, language, text)
+
+    return render(
+        request,
+        'analysis/learning_roadmap.html',
+        {
+            'analysis_payload': _sign_results(results),
+            'language': language,
+            'results': results,
+            'text': text,
+        },
+    )
+
+
 def _add_ai_priority_labels(priorities, text):
     for item in priorities:
         item['priority_label'] = text[f"ai_priority_{item['priority']}"]
     return priorities
+
+
+def _add_roadmap_labels(roadmap, text):
+    if not roadmap:
+        return roadmap
+
+    for item in roadmap.get('skills', []):
+        item['priority_label'] = text[f"ai_priority_{item['priority']}"]
+        item['stage_label'] = text[f"roadmap_{item['stage']}"]
+
+    return roadmap
 
 
 def _build_ai_status(status, text, priorities=None):
@@ -124,6 +153,14 @@ def _build_ai_status(status, text, priorities=None):
         'status': status,
         'message': text[message_key],
         'priorities': [],
+    }
+
+
+def _build_roadmap_status(status, text):
+    message_key = 'roadmap_no_priorities' if status == 'empty' else 'roadmap_unavailable'
+    return {
+        'status': status,
+        'message': text[message_key],
     }
 
 
@@ -232,6 +269,54 @@ def ai_results_view(request):
         return _render_ai_results(request, language, results, text)
 
     return _render_results(request, language, results, text)
+
+
+@require_POST
+def learning_roadmap_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    try:
+        results = signing.loads(request.POST.get('analysis_payload', ''), max_age=3600)
+    except signing.BadSignature:
+        results = {}
+
+    if results.get('learning_roadmap'):
+        return _render_learning_roadmap(request, language, results, text)
+
+    if results.get('ai_prioritisation', {}).get('status') == 'success':
+        return _render_ai_results(request, language, results, text)
+
+    return _render_results(request, language, results, text)
+
+
+@require_POST
+def ai_learning_roadmap_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    try:
+        results = signing.loads(request.POST.get('analysis_payload', ''), max_age=3600)
+    except signing.BadSignature:
+        results = {}
+
+    if results.get('ai_prioritisation', {}).get('status') != 'success':
+        results['learning_roadmap_status'] = _build_roadmap_status('empty', text)
+        return _render_ai_results(request, language, results, text)
+
+    try:
+        roadmap = generate_learning_roadmap(results, language)
+    except LearningRoadmapUnavailable:
+        results['learning_roadmap_status'] = _build_roadmap_status('fallback', text)
+        return _render_ai_results(request, language, results, text)
+
+    if not roadmap:
+        results['learning_roadmap_status'] = _build_roadmap_status('empty', text)
+        return _render_ai_results(request, language, results, text)
+
+    results['learning_roadmap'] = roadmap
+    results.pop('learning_roadmap_status', None)
+    return _render_learning_roadmap(request, language, results, text)
 
 
 @require_POST

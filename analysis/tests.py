@@ -13,6 +13,13 @@ from docx import Document
 from pypdf import PdfWriter
 
 from .document_extraction import DocumentExtractionError, extract_document_text
+from .ai_learning_roadmap import (
+    LearningRoadmapUnavailable,
+    ROADMAP_RESPONSE_SCHEMA,
+    build_learning_roadmap_input,
+    generate_learning_roadmap,
+    validate_learning_roadmap,
+)
 from .ai_prioritisation import (
     AIPrioritisationUnavailable,
     GEMINI_MODEL,
@@ -77,6 +84,57 @@ def _blank_pdf_bytes():
     writer.add_blank_page(width=72, height=72)
     writer.write(buffer)
     return buffer.getvalue()
+
+
+def _sample_roadmap(skills=None):
+    skills = skills or ['Django']
+    roadmap_skills = []
+
+    for index, skill in enumerate(skills, start=1):
+        roadmap_skills.append({
+            'skill': skill,
+            'priority': 'high' if index == 1 else 'medium',
+            'stage': 'now' if index == 1 else 'next',
+            'why_now': f'{skill} is a verified priority gap for the target role.',
+            'target_competency': f'Build and explain a practical {skill} feature for the target role.',
+            'steps': [{
+                'step_number': 1,
+                'title': f'Build a {skill} mini feature',
+                'learning_objective': f'Apply {skill} in a small realistic task.',
+                'topics': [skill, 'project evidence'],
+                'action': f'Create a small deliverable using {skill}.',
+                'why_this_step': f'This turns the {skill} gap into practical evidence.',
+                'estimated_hours': '4-6 hours',
+                'completion_criteria': f'You can explain and demonstrate the completed {skill} work.',
+            }],
+            'evidence_outcome': {
+                'deliverable': f'{skill} mini project',
+                'recruitment_value': f'This gives recruiters concrete evidence of practical {skill} ability.',
+                'what_it_demonstrates': f'Practical ability to use {skill}.',
+                'minimum_features': ['working feature', 'validation', 'README'],
+                'suggested_evidence': ['GitLab repository', 'README', 'screenshot'],
+                'interview_talking_points': ['Design decision', 'Validation approach'],
+                'cv_usage_guidance': f'After completing and testing the work, use it as future {skill} project evidence.',
+            },
+        })
+
+    return {
+        'summary': {
+            'start_with': skills[0],
+            'then': skills[1] if len(skills) > 1 else 'Consolidate the first skill',
+            'later': skills[2] if len(skills) > 2 else 'Add related practice later',
+            'strategy': 'Start with the highest priority gap, then build related evidence progressively.',
+            'total_estimated_hours': '12-18 hours',
+            'suggested_pace': 'About 1-2 weeks at 2 hours per day.',
+            'immediate_next_action': {
+                'skill': skills[0],
+                'action': f'Create one observable {skills[0]} feature today.',
+                'estimated_hours': '2-3 hours',
+                'completion_criteria': f'You can demonstrate the {skills[0]} feature without following a tutorial.',
+            },
+        },
+        'skills': roadmap_skills,
+    }
 
 
 class DocumentExtractionTests(SimpleTestCase):
@@ -651,6 +709,420 @@ class AIPrioritisationServiceTests(SimpleTestCase):
         self.assertEqual(result[0]['skill'], 'Django')
 
 
+class LearningRoadmapServiceTests(SimpleTestCase):
+    def test_roadmap_response_schema_keeps_v11_fields_but_avoids_business_constraints(self):
+        summary_schema = ROADMAP_RESPONSE_SCHEMA['properties']['summary']
+        skill_schema = ROADMAP_RESPONSE_SCHEMA['properties']['skills']['items']
+        evidence_schema = skill_schema['properties']['evidence_outcome']
+
+        self.assertEqual(ROADMAP_RESPONSE_SCHEMA['required'], ['summary', 'skills'])
+        self.assertIn('total_estimated_hours', summary_schema['required'])
+        self.assertIn('suggested_pace', summary_schema['required'])
+        self.assertIn('immediate_next_action', summary_schema['required'])
+        self.assertEqual(
+            summary_schema['properties']['immediate_next_action']['required'],
+            ['skill', 'action', 'estimated_hours', 'completion_criteria'],
+        )
+        self.assertIn('steps', skill_schema['required'])
+        self.assertEqual(skill_schema['properties']['steps']['items']['properties']['step_number']['type'], 'integer')
+        self.assertEqual(skill_schema['properties']['priority'], {'type': 'string'})
+        self.assertEqual(skill_schema['properties']['stage'], {'type': 'string'})
+        for field in [
+            'deliverable',
+            'recruitment_value',
+            'what_it_demonstrates',
+            'minimum_features',
+            'suggested_evidence',
+            'interview_talking_points',
+            'cv_usage_guidance',
+        ]:
+            self.assertIn(field, evidence_schema['required'])
+
+        self.assertNotIn('additionalProperties', str(ROADMAP_RESPONSE_SCHEMA))
+        self.assertNotIn('maxItems', str(ROADMAP_RESPONSE_SCHEMA))
+        self.assertNotIn('minItems', str(ROADMAP_RESPONSE_SCHEMA))
+        self.assertNotIn('enum', str(ROADMAP_RESPONSE_SCHEMA))
+
+    def test_build_learning_roadmap_input_uses_minimised_structured_data(self):
+        roadmap_input = build_learning_roadmap_input({
+            'cv_skills': ['Python', 'SQL'],
+            'missing_skill_details': [{
+                'skill': 'Django',
+                'jd_evidence': [{'excerpt': 'Django is required.'}],
+                'cv_evidence': [],
+            }],
+            'ai_prioritisation': {
+                'status': 'success',
+                'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Core backend skill.'}],
+            },
+        })
+
+        self.assertEqual(roadmap_input, {
+            'existing_skills': ['Python', 'SQL'],
+            'priority_gaps': [{
+                'skill': 'Django',
+                'priority': 'high',
+                'priority_reason': 'Core backend skill.',
+                'jd_evidence': ['Django is required.'],
+                'cv_evidence': None,
+            }],
+        })
+
+    def test_validate_learning_roadmap_accepts_valid_structure(self):
+        roadmap = validate_learning_roadmap(_sample_roadmap(['Django']), ['Django'])
+
+        self.assertEqual(roadmap['summary']['start_with'], 'Django')
+        self.assertEqual(roadmap['summary']['total_estimated_hours'], '12-18 hours')
+        self.assertEqual(roadmap['summary']['suggested_pace'], 'About 1-2 weeks at 2 hours per day.')
+        self.assertEqual(roadmap['summary']['immediate_next_action']['skill'], 'Django')
+        self.assertIn('completion_criteria', roadmap['summary']['immediate_next_action'])
+        self.assertEqual(roadmap['skills'][0]['skill'], 'Django')
+        self.assertEqual(roadmap['skills'][0]['steps'][0]['estimated_hours'], '4-6 hours')
+        self.assertIn('recruitment_value', roadmap['skills'][0]['evidence_outcome'])
+        self.assertIn('minimum_features', roadmap['skills'][0]['evidence_outcome'])
+        self.assertIn('interview_talking_points', roadmap['skills'][0]['evidence_outcome'])
+        self.assertIn('cv_usage_guidance', roadmap['skills'][0]['evidence_outcome'])
+
+    def test_validate_learning_roadmap_accepts_chinese_prose_with_canonical_machine_values(self):
+        roadmap_data = _sample_roadmap(['Django'])
+        roadmap_data['skills'][0]['why_now'] = 'Django 是目标岗位中已验证的高优先级差距。'
+        roadmap_data['skills'][0]['target_competency'] = '能够构建并解释一个 Django 功能。'
+        roadmap_data['skills'][0]['priority'] = 'high'
+        roadmap_data['skills'][0]['stage'] = 'now'
+
+        roadmap = validate_learning_roadmap(roadmap_data, ['Django'])
+
+        self.assertEqual(roadmap['skills'][0]['priority'], 'high')
+        self.assertEqual(roadmap['skills'][0]['stage'], 'now')
+        self.assertEqual(roadmap['skills'][0]['why_now'], 'Django 是目标岗位中已验证的高优先级差距。')
+
+    def test_validate_learning_roadmap_normalises_priority_and_stage_casing(self):
+        roadmap_data = _sample_roadmap(['Django'])
+        roadmap_data['skills'][0]['priority'] = 'High'
+        roadmap_data['skills'][0]['stage'] = 'NOW'
+
+        roadmap = validate_learning_roadmap(roadmap_data, ['Django'])
+
+        self.assertEqual(roadmap['skills'][0]['priority'], 'high')
+        self.assertEqual(roadmap['skills'][0]['stage'], 'now')
+
+    def test_validate_learning_roadmap_normalises_priority_and_stage_whitespace(self):
+        roadmap_data = _sample_roadmap(['Django'])
+        roadmap_data['skills'][0]['priority'] = ' high '
+        roadmap_data['skills'][0]['stage'] = ' now '
+
+        roadmap = validate_learning_roadmap(roadmap_data, ['Django'])
+
+        self.assertEqual(roadmap['skills'][0]['priority'], 'high')
+        self.assertEqual(roadmap['skills'][0]['stage'], 'now')
+
+    def test_validate_learning_roadmap_rejects_hallucinated_skill(self):
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(_sample_roadmap(['AWS']), ['Django'])
+
+    def test_validate_learning_roadmap_rejects_duplicate_skill(self):
+        roadmap = _sample_roadmap(['Django', 'Django'])
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_invalid_priority(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['priority'] = 'urgent'
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_translated_priority(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['priority'] = '高优先级'
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_invalid_stage(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['stage'] = 'immediately'
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_arbitrary_stage_alternative(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['stage'] = 'first'
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_more_than_three_skills(self):
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(_sample_roadmap(['Django', 'REST APIs', 'JavaScript', 'SQL']), [
+                'Django',
+                'REST APIs',
+                'JavaScript',
+                'SQL',
+            ])
+
+    def test_validate_learning_roadmap_rejects_more_than_five_steps(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['steps'] = roadmap['skills'][0]['steps'] * 6
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_empty_required_field(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['steps'][0]['completion_criteria'] = ''
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_unknown_immediate_action_skill(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['summary']['immediate_next_action']['skill'] = 'AWS'
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_empty_recruitment_value(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['evidence_outcome']['recruitment_value'] = ''
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_empty_minimum_features(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['evidence_outcome']['minimum_features'] = []
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_excessive_minimum_features(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['evidence_outcome']['minimum_features'] = [f'Feature {index}' for index in range(9)]
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_excessive_evidence_items(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['evidence_outcome']['suggested_evidence'] = [f'Evidence {index}' for index in range(7)]
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_excessive_interview_talking_points(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['skills'][0]['evidence_outcome']['interview_talking_points'] = [
+            f'Talking point {index}' for index in range(5)
+        ]
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_malformed_evidence_schema(self):
+        roadmap = _sample_roadmap(['Django'])
+        del roadmap['skills'][0]['evidence_outcome']['cv_usage_guidance']
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_malformed_or_empty_response(self):
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap({'summary': {}, 'skills': []}, ['Django'])
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_missing_gemini_api_key_triggers_roadmap_fallback_exception(self):
+        with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+            with self.assertRaises(LearningRoadmapUnavailable):
+                generate_learning_roadmap({
+                    'cv_skills': ['Python'],
+                    'ai_prioritisation': {
+                        'status': 'success',
+                        'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                    },
+                    'missing_skill_details': [{'skill': 'Django', 'jd_evidence': [], 'cv_evidence': []}],
+                }, 'en')
+
+        self.assertIn(
+            'Learning roadmap unavailable: missing API key or Gemini SDK unavailable',
+            '\n'.join(logs.output),
+        )
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.genai')
+    def test_learning_roadmap_logs_validation_failure_reason_safely(self, mock_genai):
+        class FakeResponse:
+            text = '{"summary":{},"skills":[]}'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.return_value = FakeResponse()
+
+        with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+            with self.assertRaises(LearningRoadmapUnavailable):
+                generate_learning_roadmap({
+                    'cv_skills': ['Python'],
+                    'ai_prioritisation': {
+                        'status': 'success',
+                        'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                    },
+                    'missing_skill_details': [{
+                        'skill': 'Django',
+                        'jd_evidence': [{'excerpt': 'Django is required.'}],
+                        'cv_evidence': [],
+                    }],
+                }, 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Learning roadmap validation failed: skills is empty', logged_output)
+        self.assertNotIn('Django is required.', logged_output)
+        self.assertNotIn('test-key', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.genai')
+    def test_learning_roadmap_json_failure_does_not_log_raw_response(self, mock_genai):
+        class FakeResponse:
+            text = 'not json with raw private CV details'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.return_value = FakeResponse()
+
+        with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+            with self.assertRaises(LearningRoadmapUnavailable):
+                generate_learning_roadmap({
+                    'cv_skills': ['Python'],
+                    'ai_prioritisation': {
+                        'status': 'success',
+                        'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                    },
+                    'missing_skill_details': [{'skill': 'Django', 'jd_evidence': [], 'cv_evidence': []}],
+                }, 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Learning roadmap JSON parsing failed: JSONDecodeError', logged_output)
+        self.assertNotIn('raw private CV details', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.genai')
+    def test_learning_roadmap_sdk_failure_does_not_log_exception_payload(self, mock_genai):
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = RuntimeError('private JD payload test-key')
+
+        with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+            with self.assertRaises(LearningRoadmapUnavailable):
+                generate_learning_roadmap({
+                    'cv_skills': ['Python'],
+                    'ai_prioritisation': {
+                        'status': 'success',
+                        'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                    },
+                    'missing_skill_details': [{'skill': 'Django', 'jd_evidence': [], 'cv_evidence': []}],
+                }, 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn(
+            'Learning roadmap Gemini request failed: RuntimeError status=unknown code=unknown message="unavailable"',
+            logged_output,
+        )
+        self.assertNotIn('private JD payload', logged_output)
+        self.assertNotIn('test-key', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.genai')
+    def test_learning_roadmap_client_error_logs_safe_api_metadata(self, mock_genai):
+        class FakeClientError(Exception):
+            code = 400
+            status = 'INVALID_ARGUMENT'
+            message = 'Invalid response_json_schema: unsupported field additionalProperties.'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = FakeClientError()
+
+        with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+            with self.assertRaises(LearningRoadmapUnavailable):
+                generate_learning_roadmap({
+                    'cv_skills': ['Python'],
+                    'ai_prioritisation': {
+                        'status': 'success',
+                        'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                    },
+                    'missing_skill_details': [{
+                        'skill': 'Django',
+                        'jd_evidence': [{'excerpt': 'Django is required.'}],
+                        'cv_evidence': [],
+                    }],
+                }, 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Learning roadmap Gemini request failed: FakeClientError', logged_output)
+        self.assertIn('status=400', logged_output)
+        self.assertIn('code=INVALID_ARGUMENT', logged_output)
+        self.assertIn('Invalid response_json_schema: unsupported field additionalProperties.', logged_output)
+        self.assertNotIn('test-key', logged_output)
+        self.assertNotIn('Django is required.', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.genai')
+    def test_learning_roadmap_client_error_omits_message_with_raw_evidence(self, mock_genai):
+        class FakeClientError(Exception):
+            code = 400
+            status = 'INVALID_ARGUMENT'
+            message = 'Invalid request included Django is required for this role.'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = FakeClientError()
+
+        with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+            with self.assertRaises(LearningRoadmapUnavailable):
+                generate_learning_roadmap({
+                    'cv_skills': ['Python'],
+                    'ai_prioritisation': {
+                        'status': 'success',
+                        'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                    },
+                    'missing_skill_details': [{
+                        'skill': 'Django',
+                        'jd_evidence': [{'excerpt': 'Django is required for this role.'}],
+                        'cv_evidence': [],
+                    }],
+                }, 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('status=400', logged_output)
+        self.assertIn('code=INVALID_ARGUMENT', logged_output)
+        self.assertIn('[omitted unsafe or overly long API message]', logged_output)
+        self.assertNotIn('Django is required for this role.', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.genai')
+    def test_learning_roadmap_client_error_redacts_personal_identifiers(self, mock_genai):
+        class FakeClientError(Exception):
+            code = 400
+            status = 'INVALID_ARGUMENT'
+            message = 'Invalid schema for ada@example.com and +44 7700 900123.'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = FakeClientError()
+
+        with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+            with self.assertRaises(LearningRoadmapUnavailable):
+                generate_learning_roadmap({
+                    'cv_skills': ['Python'],
+                    'ai_prioritisation': {
+                        'status': 'success',
+                        'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                    },
+                    'missing_skill_details': [{'skill': 'Django', 'jd_evidence': [], 'cv_evidence': []}],
+                }, 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('[redacted-email]', logged_output)
+        self.assertIn('[redacted-phone]', logged_output)
+        self.assertNotIn('ada@example.com', logged_output)
+        self.assertNotIn('+44 7700 900123', logged_output)
+
+
 class InterfaceLanguageTests(SimpleTestCase):
     def _results_response(self, language='en', cv_text='Python SQL Git', job_description_text='Python SQL Django REST APIs JavaScript'):
         return self.client.post(f'/?lang={language}', data={
@@ -673,6 +1145,18 @@ class InterfaceLanguageTests(SimpleTestCase):
 
     def _switch_ai_results_language(self, response, language):
         return self.client.post(f'/results/ai-results/?lang={language}', data={
+            'analysis_payload': response.context['analysis_payload'],
+            'output_language': language,
+        })
+
+    def _post_learning_roadmap(self, response, language='en'):
+        return self.client.post(f'/results/ai-learning-roadmap/?lang={language}', data={
+            'analysis_payload': response.context['analysis_payload'],
+            'output_language': language,
+        })
+
+    def _switch_learning_roadmap_language(self, response, language):
+        return self.client.post(f'/results/learning-roadmap/?lang={language}', data={
             'analysis_payload': response.context['analysis_payload'],
             'output_language': language,
         })
@@ -1016,6 +1500,211 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '高优先级')
         self.assertContains(response, '为什么这是优先项')
         self.assertContains(response, '← 返回完整分析结果')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_results_page_displays_learning_roadmap_cta(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+
+        mock_roadmap.assert_not_called()
+        self.assertContains(response, 'Turn Your Priorities into Action')
+        self.assertContains(
+            response,
+            'You know which skill gaps matter most. Now turn them into a personalised, step-by-step learning plan based on your target role and existing skills.',
+        )
+        self.assertContains(response, 'Get clear learning goals, practical tasks, estimated effort and evidence')
+        self.assertContains(response, '✨ Build My AI Learning Roadmap →')
+        self.assertContains(response, 'action="/results/ai-learning-roadmap/?lang=en"')
+        self.assertContains(response, 'name="analysis_payload"')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_chinese_learning_roadmap_cta_renders(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是核心后端框架要求。'},
+        ]
+        response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
+
+        self.assertContains(response, '把优先级变成具体行动')
+        self.assertContains(response, '✨ 生成我的 AI 学习路线 →')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_learning_roadmap_endpoint_invokes_service_after_explicit_post(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django'])
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        response = self._post_learning_roadmap(ai_response, 'en')
+
+        mock_roadmap.assert_called_once()
+        self.assertTemplateUsed(response, 'analysis/learning_roadmap.html')
+        self.assertContains(response, 'My AI Learning Roadmap')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_learning_roadmap_call_receives_minimised_state(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django'])
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+
+        self._post_learning_roadmap(ai_response, 'en')
+
+        roadmap_results = mock_roadmap.call_args.args[0]
+        self.assertEqual(roadmap_results['cv_skills'], ['Python', 'SQL', 'Git'])
+        self.assertEqual(roadmap_results['ai_prioritisation']['priorities'][0]['skill'], 'Django')
+        self.assertIn('missing_skill_details', roadmap_results)
+        self.assertNotIn('cv_text', roadmap_results)
+        self.assertNotIn('job_description_text', roadmap_results)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_valid_learning_roadmap_renders_page_four(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+            {'skill': 'REST APIs', 'priority': 'medium', 'reason': 'REST APIs support service work.'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django', 'REST APIs'])
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        response = self._post_learning_roadmap(ai_response, 'en')
+
+        self.assertTemplateUsed(response, 'analysis/learning_roadmap.html')
+        self.assertContains(response, 'My AI Learning Roadmap')
+        self.assertContains(response, 'YOUR PLAN')
+        self.assertContains(response, 'IMMEDIATE NEXT ACTION')
+        self.assertContains(response, 'Create one observable Django feature today.')
+        self.assertContains(response, 'TOTAL ESTIMATED EFFORT')
+        self.assertContains(response, '12-18 hours')
+        self.assertContains(response, 'SUGGESTED PACE')
+        self.assertContains(response, 'About 1-2 weeks at 2 hours per day.')
+        self.assertContains(response, 'NOW')
+        self.assertContains(response, 'NEXT')
+        self.assertContains(response, 'ROADMAP STRATEGY')
+        self.assertContains(response, '1. Django')
+        self.assertContains(response, 'Why this comes first')
+        self.assertContains(response, 'Target competency')
+        self.assertContains(response, 'STEP 1')
+        self.assertContains(response, '4-6 hours')
+        self.assertContains(response, 'You are done when')
+        self.assertContains(response, 'PROOF OF SKILL')
+        self.assertContains(response, 'Minimum features')
+        self.assertContains(response, 'working feature')
+        self.assertContains(response, 'Why it matters for recruitment')
+        self.assertContains(response, 'concrete evidence of practical Django ability')
+        self.assertContains(response, 'GitLab repository')
+        self.assertContains(response, 'Interview talking points')
+        self.assertContains(response, 'Design decision')
+        self.assertContains(response, 'CV usage guidance')
+        self.assertContains(response, 'future Django project evidence')
+        self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_chinese_learning_roadmap_page_labels_render(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是核心后端框架要求。'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django'])
+        ai_response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
+        response = self._post_learning_roadmap(ai_response, 'zh')
+
+        self.assertContains(response, '我的 AI 学习路线')
+        self.assertContains(response, '你的学习顺序')
+        self.assertContains(response, '立即开始')
+        self.assertContains(response, '总预计投入')
+        self.assertContains(response, '建议节奏')
+        self.assertContains(response, '路线策略')
+        self.assertContains(response, '技能证明')
+        self.assertContains(response, '为什么对求职有价值')
+        self.assertContains(response, '面试讨论要点')
+        self.assertContains(response, '简历使用建议')
+        self.assertContains(response, '← 返回 AI 优先级')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_learning_roadmap_language_switch_preserves_roadmap_without_ai_calls(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django'])
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        roadmap_response = self._post_learning_roadmap(ai_response, 'en')
+        mock_prioritise.reset_mock()
+        mock_roadmap.reset_mock()
+
+        with patch('analysis.views.extract_skills') as mock_extract_skills:
+            switched_response = self._switch_learning_roadmap_language(roadmap_response, 'zh')
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        mock_extract_skills.assert_not_called()
+        self.assertTemplateUsed(switched_response, 'analysis/learning_roadmap.html')
+        self.assertContains(switched_response, '我的 AI 学习路线')
+        self.assertContains(switched_response, 'Django mini project')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_learning_roadmap_back_to_ai_priorities_preserves_priorities_without_ai_call(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django'])
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        roadmap_response = self._post_learning_roadmap(ai_response, 'en')
+        mock_prioritise.reset_mock()
+        mock_roadmap.reset_mock()
+        response = self.client.post('/results/ai-results/?lang=en', data={
+            'analysis_payload': roadmap_response.context['analysis_payload'],
+            'output_language': 'en',
+        })
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, '1 · Django')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_learning_roadmap_failure_stays_on_page_three_with_priorities(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        mock_roadmap.side_effect = LearningRoadmapUnavailable
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        response = self._post_learning_roadmap(ai_response, 'en')
+
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, '1 · Django')
+        self.assertContains(
+            response,
+            'AI learning roadmap is temporarily unavailable. Your prioritised skill gaps are still available above, and you can try generating the roadmap again.',
+        )
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_chinese_learning_roadmap_failure_message_renders(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是核心后端框架要求。'},
+        ]
+        mock_roadmap.side_effect = LearningRoadmapUnavailable
+        ai_response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
+        response = self._post_learning_roadmap(ai_response, 'zh')
+
+        self.assertContains(response, 'AI 学习路线暂时不可用。你仍可查看上方已经生成的技能优先级，并可以稍后再次尝试生成学习路线。')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    def test_roadmap_endpoint_skips_service_when_no_priorities_exist(self, mock_roadmap):
+        results_response = self._results_response('en')
+        response = self._post_learning_roadmap(results_response, 'en')
+
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, 'No AI priority skills are available for roadmap generation.')
 
     @patch('analysis.views.prioritise_skill_gaps')
     def test_ai_results_english_to_chinese_language_switch_preserves_priority_data(self, mock_prioritise):
