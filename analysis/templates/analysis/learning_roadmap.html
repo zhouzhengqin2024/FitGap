@@ -48,84 +48,86 @@
                     </div>
                     <div class="row g-3">
                         <div class="col-12 col-md-4">
-                            <div class="text-uppercase small fw-bold text-muted">{{ text.roadmap_now }}</div>
-                            <p class="mb-0">{{ results.learning_roadmap.summary.start_with }}</p>
-                        </div>
-                        <div class="col-12 col-md-4">
-                            <div class="text-uppercase small fw-bold text-muted">{{ text.roadmap_next }}</div>
-                            <p class="mb-0">{{ results.learning_roadmap.summary.then }}</p>
-                        </div>
-                        <div class="col-12 col-md-4">
-                            <div class="text-uppercase small fw-bold text-muted">{{ text.roadmap_later }}</div>
-                            <p class="mb-0">{{ results.learning_roadmap.summary.later }}</p>
-                        </div>
-                    </div>
-                    <div class="row g-3 mt-1">
-                        <div class="col-12 col-md-6">
                             <div class="text-uppercase small fw-bold text-muted">{{ text.roadmap_total_estimated_effort }}</div>
-                            <p class="mb-0">{{ results.learning_roadmap.summary.total_estimated_hours }}</p>
+                            <p class="mb-0">{{ results.learning_roadmap.summary.core_estimated_hours }}</p>
                         </div>
-                        <div class="col-12 col-md-6">
+                        <div class="col-12 col-md-4">
                             <div class="text-uppercase small fw-bold text-muted">{{ text.roadmap_suggested_pace }}</div>
                             <p class="mb-0">{{ results.learning_roadmap.summary.suggested_pace }}</p>
                         </div>
+                        <div class="col-12 col-md-4">
+                            <div class="text-uppercase small fw-bold text-muted">{{ text.roadmap_can_wait }}</div>
+                            <p class="mb-0">{{ results.learning_roadmap.summary.can_wait }}</p>
+                        </div>
                     </div>
-                    <h3 class="h5 fw-bold mt-4">{{ text.roadmap_strategy }}</h3>
-                    <p class="mb-0">{{ results.learning_roadmap.summary.strategy }}</p>
+                    <details class="mt-4">
+                        <summary class="fw-semibold" style="color: #1D63ED;">{{ text.roadmap_strategy }}</summary>
+                        <p class="mb-0 mt-2">{{ results.learning_roadmap.summary.strategy }}</p>
+                    </details>
                 </section>
 
                 {% for skill in results.learning_roadmap.skills %}
                     <section class="mb-4 p-4 rounded-3 bg-white border">
                         <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
                             <h2 class="h3 fw-bold mb-0">{{ forloop.counter }}. {{ skill.skill }}</h2>
-                            <span class="d-flex gap-2">
+                            <span class="d-flex flex-wrap gap-2">
                                 <span class="badge text-bg-primary">{{ skill.priority_label }}</span>
                                 <span class="badge text-bg-secondary">{{ skill.stage_label }}</span>
+                                <span class="badge text-bg-light border text-dark">{{ skill.estimated_hours }}</span>
                             </span>
                         </div>
 
-                        <h3 class="h5">{{ text.roadmap_why_first }}</h3>
-                        <p>{{ skill.why_now }}</p>
+                        <p class="mb-2"><strong>{{ text.roadmap_target_outcome }}:</strong> {{ skill.target_outcome }}</p>
+                        <p class="mb-2"><strong>{{ text.roadmap_evidence_target }}:</strong> {{ skill.evidence_target }}</p>
+                        <p class="mb-3"><strong>{{ text.roadmap_verification_standard }}:</strong> {{ skill.verification_standard }}</p>
 
-                        <h3 class="h5">{{ text.roadmap_target_competency }}</h3>
-                        <p>{{ skill.target_competency }}</p>
+                        <h3 class="h5">{{ text.roadmap_core_steps }}</h3>
+                        <ol class="mb-3 ps-3">
+                            {% for step in skill.core_steps %}
+                                <li class="mb-2">
+                                    <strong>{{ step.title }}</strong>
+                                    <span class="text-muted">({{ step.estimated_hours }})</span><br>
+                                    {{ step.action }}
+                                </li>
+                            {% empty %}
+                                <li>{{ results.learning_roadmap.summary.can_wait }}</li>
+                            {% endfor %}
+                        </ol>
 
-                        {% for step in skill.steps %}
+                        <details class="border-top pt-3 mt-3">
+                            <summary class="fw-semibold" style="color: #1D63ED;">{{ text.roadmap_view_details }}</summary>
+                            {% for step in skill.core_steps %}
+                                <div class="border-top pt-3 mt-3">
+                                    <h4 class="h5">{{ text.roadmap_step }} {{ step.step_number }} · {{ step.title }}</h4>
+                                    <p><strong>{{ text.roadmap_topics }}:</strong> {{ step.topics|join:", " }}</p>
+                                    <p><strong>{{ text.roadmap_why_step }}:</strong> {{ step.why_this_step }}</p>
+                                    <p class="mb-0"><strong>{{ text.roadmap_done_when }}:</strong> {{ step.completion_criteria }}</p>
+                                </div>
+                            {% endfor %}
+
                             <div class="border-top pt-3 mt-3">
-                                <h4 class="h5">{{ text.roadmap_step }} {{ step.step_number }} · {{ step.title }}</h4>
-                                <p><strong>{{ text.roadmap_topics }}:</strong> {{ step.topics|join:", " }}</p>
-                                <p><strong>{{ text.roadmap_action }}:</strong> {{ step.action }}</p>
-                                <p><strong>{{ text.roadmap_why_step }}:</strong> {{ step.why_this_step }}</p>
-                                <p><strong>{{ text.roadmap_estimated_effort }}:</strong> {{ step.estimated_hours }}</p>
-                                <p class="mb-0"><strong>{{ text.roadmap_done_when }}:</strong> {{ step.completion_criteria }}</p>
+                                <h3 class="h5">{{ text.roadmap_proof }}</h3>
+                                <p class="mb-1"><strong>{{ text.roadmap_minimum_features }}:</strong></p>
+                                <ul>
+                                    {% for feature in skill.details.minimum_features %}
+                                        <li>{{ feature }}</li>
+                                    {% endfor %}
+                                </ul>
+                                <p class="mb-1"><strong>{{ text.roadmap_evidence_to_keep }}:</strong></p>
+                                <ul>
+                                    {% for evidence in skill.details.evidence_to_keep %}
+                                        <li>{{ evidence }}</li>
+                                    {% endfor %}
+                                </ul>
+                                <p class="mb-1"><strong>{{ text.roadmap_interview_talking_points }}:</strong></p>
+                                <ul>
+                                    {% for point in skill.details.interview_talking_points %}
+                                        <li>{{ point }}</li>
+                                    {% endfor %}
+                                </ul>
+                                <p class="mb-0"><strong>{{ text.roadmap_cv_usage_guidance }}:</strong> {{ skill.details.cv_usage_guidance }}</p>
                             </div>
-                        {% endfor %}
-
-                        <div class="border-top pt-3 mt-3">
-                            <h3 class="h5">{{ text.roadmap_proof }}</h3>
-                            <p><strong>{{ text.roadmap_deliverable }}:</strong> {{ skill.evidence_outcome.deliverable }}</p>
-                            <p><strong>{{ text.roadmap_recruitment_value }}:</strong> {{ skill.evidence_outcome.recruitment_value }}</p>
-                            <p><strong>{{ text.roadmap_demonstrates }}:</strong> {{ skill.evidence_outcome.what_it_demonstrates }}</p>
-                            <p class="mb-1"><strong>{{ text.roadmap_minimum_features }}:</strong></p>
-                            <ul>
-                                {% for feature in skill.evidence_outcome.minimum_features %}
-                                    <li>{{ feature }}</li>
-                                {% endfor %}
-                            </ul>
-                            <p class="mb-1"><strong>{{ text.roadmap_evidence_to_keep }}:</strong></p>
-                            <ul>
-                                {% for evidence in skill.evidence_outcome.suggested_evidence %}
-                                    <li>{{ evidence }}</li>
-                                {% endfor %}
-                            </ul>
-                            <p class="mb-1"><strong>{{ text.roadmap_interview_talking_points }}:</strong></p>
-                            <ul>
-                                {% for point in skill.evidence_outcome.interview_talking_points %}
-                                    <li>{{ point }}</li>
-                                {% endfor %}
-                            </ul>
-                            <p class="mb-0"><strong>{{ text.roadmap_cv_usage_guidance }}:</strong> {{ skill.evidence_outcome.cv_usage_guidance }}</p>
-                        </div>
+                        </details>
                     </section>
                 {% endfor %}
 

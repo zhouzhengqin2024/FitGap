@@ -95,24 +95,22 @@ def _sample_roadmap(skills=None):
             'skill': skill,
             'priority': 'high' if index == 1 else 'medium',
             'stage': 'now' if index == 1 else 'next',
-            'why_now': f'{skill} is a verified priority gap for the target role.',
-            'target_competency': f'Build and explain a practical {skill} feature for the target role.',
-            'steps': [{
+            'estimated_hours': '6-8 hours' if index == 1 else '3-4 hours',
+            'target_outcome': f'Build and explain a practical {skill} feature for the target role.',
+            'core_steps': [{
                 'step_number': 1,
                 'title': f'Build a {skill} mini feature',
-                'learning_objective': f'Apply {skill} in a small realistic task.',
-                'topics': [skill, 'project evidence'],
                 'action': f'Create a small deliverable using {skill}.',
-                'why_this_step': f'This turns the {skill} gap into practical evidence.',
                 'estimated_hours': '4-6 hours',
                 'completion_criteria': f'You can explain and demonstrate the completed {skill} work.',
+                'why_this_step': f'This turns the {skill} gap into practical evidence.',
+                'topics': [skill, 'project evidence'],
             }],
-            'evidence_outcome': {
-                'deliverable': f'{skill} mini project',
-                'recruitment_value': f'This gives recruiters concrete evidence of practical {skill} ability.',
-                'what_it_demonstrates': f'Practical ability to use {skill}.',
+            'verification_standard': f'You can independently demonstrate the completed {skill} work.',
+            'evidence_target': f'{skill} mini project with Git history and README',
+            'details': {
                 'minimum_features': ['working feature', 'validation', 'README'],
-                'suggested_evidence': ['GitLab repository', 'README', 'screenshot'],
+                'evidence_to_keep': ['GitLab repository', 'README', 'screenshot'],
                 'interview_talking_points': ['Design decision', 'Validation approach'],
                 'cv_usage_guidance': f'After completing and testing the work, use it as future {skill} project evidence.',
             },
@@ -120,18 +118,16 @@ def _sample_roadmap(skills=None):
 
     return {
         'summary': {
-            'start_with': skills[0],
-            'then': skills[1] if len(skills) > 1 else 'Consolidate the first skill',
-            'later': skills[2] if len(skills) > 2 else 'Add related practice later',
-            'strategy': 'Start with the highest priority gap, then build related evidence progressively.',
-            'total_estimated_hours': '12-18 hours',
-            'suggested_pace': 'About 1-2 weeks at 2 hours per day.',
             'immediate_next_action': {
                 'skill': skills[0],
                 'action': f'Create one observable {skills[0]} feature today.',
                 'estimated_hours': '2-3 hours',
                 'completion_criteria': f'You can demonstrate the {skills[0]} feature without following a tutorial.',
             },
+            'core_estimated_hours': '12-18 hours',
+            'suggested_pace': 'About 1-2 weeks at 2 hours per day.',
+            'can_wait': 'Machine Learning can wait until core backend evidence is complete.',
+            'strategy': 'Start with the highest priority gap and build one credible artifact. Keep applying while optional skills wait.',
         },
         'skills': roadmap_skills,
     }
@@ -713,30 +709,32 @@ class LearningRoadmapServiceTests(SimpleTestCase):
     def test_roadmap_response_schema_keeps_v11_fields_but_avoids_business_constraints(self):
         summary_schema = ROADMAP_RESPONSE_SCHEMA['properties']['summary']
         skill_schema = ROADMAP_RESPONSE_SCHEMA['properties']['skills']['items']
-        evidence_schema = skill_schema['properties']['evidence_outcome']
+        details_schema = skill_schema['properties']['details']
 
         self.assertEqual(ROADMAP_RESPONSE_SCHEMA['required'], ['summary', 'skills'])
-        self.assertIn('total_estimated_hours', summary_schema['required'])
+        self.assertIn('core_estimated_hours', summary_schema['required'])
         self.assertIn('suggested_pace', summary_schema['required'])
+        self.assertIn('can_wait', summary_schema['required'])
         self.assertIn('immediate_next_action', summary_schema['required'])
         self.assertEqual(
             summary_schema['properties']['immediate_next_action']['required'],
             ['skill', 'action', 'estimated_hours', 'completion_criteria'],
         )
-        self.assertIn('steps', skill_schema['required'])
-        self.assertEqual(skill_schema['properties']['steps']['items']['properties']['step_number']['type'], 'integer')
+        self.assertIn('core_steps', skill_schema['required'])
+        self.assertIn('estimated_hours', skill_schema['required'])
+        self.assertIn('target_outcome', skill_schema['required'])
+        self.assertIn('verification_standard', skill_schema['required'])
+        self.assertIn('evidence_target', skill_schema['required'])
+        self.assertEqual(skill_schema['properties']['core_steps']['items']['properties']['step_number']['type'], 'integer')
         self.assertEqual(skill_schema['properties']['priority'], {'type': 'string'})
         self.assertEqual(skill_schema['properties']['stage'], {'type': 'string'})
         for field in [
-            'deliverable',
-            'recruitment_value',
-            'what_it_demonstrates',
             'minimum_features',
-            'suggested_evidence',
+            'evidence_to_keep',
             'interview_talking_points',
             'cv_usage_guidance',
         ]:
-            self.assertIn(field, evidence_schema['required'])
+            self.assertIn(field, details_schema['required'])
 
         self.assertNotIn('additionalProperties', str(ROADMAP_RESPONSE_SCHEMA))
         self.assertNotIn('maxItems', str(ROADMAP_RESPONSE_SCHEMA))
@@ -771,22 +769,23 @@ class LearningRoadmapServiceTests(SimpleTestCase):
     def test_validate_learning_roadmap_accepts_valid_structure(self):
         roadmap = validate_learning_roadmap(_sample_roadmap(['Django']), ['Django'])
 
-        self.assertEqual(roadmap['summary']['start_with'], 'Django')
-        self.assertEqual(roadmap['summary']['total_estimated_hours'], '12-18 hours')
+        self.assertEqual(roadmap['summary']['core_estimated_hours'], '12-18 hours')
         self.assertEqual(roadmap['summary']['suggested_pace'], 'About 1-2 weeks at 2 hours per day.')
+        self.assertIn('Machine Learning can wait', roadmap['summary']['can_wait'])
+        self.assertGreater(len(roadmap['summary']['strategy']), 0)
+        self.assertLessEqual(len(roadmap['summary']['strategy']), 320)
         self.assertEqual(roadmap['summary']['immediate_next_action']['skill'], 'Django')
         self.assertIn('completion_criteria', roadmap['summary']['immediate_next_action'])
         self.assertEqual(roadmap['skills'][0]['skill'], 'Django')
-        self.assertEqual(roadmap['skills'][0]['steps'][0]['estimated_hours'], '4-6 hours')
-        self.assertIn('recruitment_value', roadmap['skills'][0]['evidence_outcome'])
-        self.assertIn('minimum_features', roadmap['skills'][0]['evidence_outcome'])
-        self.assertIn('interview_talking_points', roadmap['skills'][0]['evidence_outcome'])
-        self.assertIn('cv_usage_guidance', roadmap['skills'][0]['evidence_outcome'])
+        self.assertEqual(roadmap['skills'][0]['estimated_hours'], '6-8 hours')
+        self.assertEqual(roadmap['skills'][0]['core_steps'][0]['estimated_hours'], '4-6 hours')
+        self.assertIn('minimum_features', roadmap['skills'][0]['details'])
+        self.assertIn('interview_talking_points', roadmap['skills'][0]['details'])
+        self.assertIn('cv_usage_guidance', roadmap['skills'][0]['details'])
 
     def test_validate_learning_roadmap_accepts_chinese_prose_with_canonical_machine_values(self):
         roadmap_data = _sample_roadmap(['Django'])
-        roadmap_data['skills'][0]['why_now'] = 'Django 是目标岗位中已验证的高优先级差距。'
-        roadmap_data['skills'][0]['target_competency'] = '能够构建并解释一个 Django 功能。'
+        roadmap_data['skills'][0]['target_outcome'] = '能够构建并解释一个 Django 功能。'
         roadmap_data['skills'][0]['priority'] = 'high'
         roadmap_data['skills'][0]['stage'] = 'now'
 
@@ -794,7 +793,7 @@ class LearningRoadmapServiceTests(SimpleTestCase):
 
         self.assertEqual(roadmap['skills'][0]['priority'], 'high')
         self.assertEqual(roadmap['skills'][0]['stage'], 'now')
-        self.assertEqual(roadmap['skills'][0]['why_now'], 'Django 是目标岗位中已验证的高优先级差距。')
+        self.assertEqual(roadmap['skills'][0]['target_outcome'], '能够构建并解释一个 Django 功能。')
 
     def test_validate_learning_roadmap_normalises_priority_and_stage_casing(self):
         roadmap_data = _sample_roadmap(['Django'])
@@ -863,16 +862,42 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 'SQL',
             ])
 
-    def test_validate_learning_roadmap_rejects_more_than_five_steps(self):
+    def test_validate_learning_roadmap_rejects_more_than_three_high_priority_core_steps(self):
         roadmap = _sample_roadmap(['Django'])
-        roadmap['skills'][0]['steps'] = roadmap['skills'][0]['steps'] * 6
+        roadmap['skills'][0]['core_steps'] = roadmap['skills'][0]['core_steps'] * 4
 
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap(roadmap, ['Django'])
 
+    def test_validate_learning_roadmap_rejects_more_than_three_medium_priority_core_steps(self):
+        roadmap = _sample_roadmap(['Django', 'REST APIs'])
+        roadmap['skills'][1]['core_steps'] = roadmap['skills'][1]['core_steps'] * 4
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django', 'REST APIs'])
+
+    def test_validate_learning_roadmap_rejects_more_than_one_low_priority_core_step(self):
+        roadmap = _sample_roadmap(['Machine Learning'])
+        roadmap['skills'][0]['priority'] = 'low'
+        roadmap['skills'][0]['stage'] = 'later'
+        roadmap['skills'][0]['core_steps'] = roadmap['skills'][0]['core_steps'] * 2
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Machine Learning'])
+
+    def test_validate_learning_roadmap_accepts_low_priority_optional_without_core_steps(self):
+        roadmap = _sample_roadmap(['Machine Learning'])
+        roadmap['skills'][0]['priority'] = 'low'
+        roadmap['skills'][0]['stage'] = 'later'
+        roadmap['skills'][0]['core_steps'] = []
+
+        validated = validate_learning_roadmap(roadmap, ['Machine Learning'])
+
+        self.assertEqual(validated['skills'][0]['core_steps'], [])
+
     def test_validate_learning_roadmap_rejects_empty_required_field(self):
         roadmap = _sample_roadmap(['Django'])
-        roadmap['skills'][0]['steps'][0]['completion_criteria'] = ''
+        roadmap['skills'][0]['core_steps'][0]['completion_criteria'] = ''
 
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap(roadmap, ['Django'])
@@ -886,35 +911,35 @@ class LearningRoadmapServiceTests(SimpleTestCase):
 
     def test_validate_learning_roadmap_rejects_empty_recruitment_value(self):
         roadmap = _sample_roadmap(['Django'])
-        roadmap['skills'][0]['evidence_outcome']['recruitment_value'] = ''
+        roadmap['skills'][0]['evidence_target'] = ''
 
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap(roadmap, ['Django'])
 
     def test_validate_learning_roadmap_rejects_empty_minimum_features(self):
         roadmap = _sample_roadmap(['Django'])
-        roadmap['skills'][0]['evidence_outcome']['minimum_features'] = []
+        roadmap['skills'][0]['details']['minimum_features'] = []
 
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap(roadmap, ['Django'])
 
     def test_validate_learning_roadmap_rejects_excessive_minimum_features(self):
         roadmap = _sample_roadmap(['Django'])
-        roadmap['skills'][0]['evidence_outcome']['minimum_features'] = [f'Feature {index}' for index in range(9)]
+        roadmap['skills'][0]['details']['minimum_features'] = [f'Feature {index}' for index in range(9)]
 
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap(roadmap, ['Django'])
 
     def test_validate_learning_roadmap_rejects_excessive_evidence_items(self):
         roadmap = _sample_roadmap(['Django'])
-        roadmap['skills'][0]['evidence_outcome']['suggested_evidence'] = [f'Evidence {index}' for index in range(7)]
+        roadmap['skills'][0]['details']['evidence_to_keep'] = [f'Evidence {index}' for index in range(7)]
 
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap(roadmap, ['Django'])
 
     def test_validate_learning_roadmap_rejects_excessive_interview_talking_points(self):
         roadmap = _sample_roadmap(['Django'])
-        roadmap['skills'][0]['evidence_outcome']['interview_talking_points'] = [
+        roadmap['skills'][0]['details']['interview_talking_points'] = [
             f'Talking point {index}' for index in range(5)
         ]
 
@@ -923,7 +948,7 @@ class LearningRoadmapServiceTests(SimpleTestCase):
 
     def test_validate_learning_roadmap_rejects_malformed_evidence_schema(self):
         roadmap = _sample_roadmap(['Django'])
-        del roadmap['skills'][0]['evidence_outcome']['cv_usage_guidance']
+        del roadmap['skills'][0]['details']['cv_usage_guidance']
 
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap(roadmap, ['Django'])
@@ -931,6 +956,13 @@ class LearningRoadmapServiceTests(SimpleTestCase):
     def test_validate_learning_roadmap_rejects_malformed_or_empty_response(self):
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap({'summary': {}, 'skills': []}, ['Django'])
+
+    def test_validate_learning_roadmap_rejects_overlong_strategy(self):
+        roadmap = _sample_roadmap(['Django'])
+        roadmap['summary']['strategy'] = 'Too long. ' * 40
+
+        with self.assertRaises(LearningRoadmapUnavailable):
+            validate_learning_roadmap(roadmap, ['Django'])
 
     @patch.dict(os.environ, {}, clear=True)
     def test_missing_gemini_api_key_triggers_roadmap_fallback_exception(self):
@@ -1575,27 +1607,31 @@ class InterfaceLanguageTests(SimpleTestCase):
 
         self.assertTemplateUsed(response, 'analysis/learning_roadmap.html')
         self.assertContains(response, 'My AI Learning Roadmap')
-        self.assertContains(response, 'YOUR PLAN')
+        self.assertContains(response, 'MINIMUM VIABLE LEARNING PATH')
         self.assertContains(response, 'IMMEDIATE NEXT ACTION')
         self.assertContains(response, 'Create one observable Django feature today.')
-        self.assertContains(response, 'TOTAL ESTIMATED EFFORT')
+        self.assertContains(response, 'CORE GAP-CLOSING EFFORT')
         self.assertContains(response, '12-18 hours')
         self.assertContains(response, 'SUGGESTED PACE')
         self.assertContains(response, 'About 1-2 weeks at 2 hours per day.')
-        self.assertContains(response, 'NOW')
-        self.assertContains(response, 'NEXT')
+        self.assertContains(response, 'CAN WAIT / OPTIONAL')
+        self.assertContains(response, 'Machine Learning can wait')
         self.assertContains(response, 'ROADMAP STRATEGY')
         self.assertContains(response, '1. Django')
-        self.assertContains(response, 'Why this comes first')
-        self.assertContains(response, 'Target competency')
-        self.assertContains(response, 'STEP 1')
+        self.assertContains(response, '6-8 hours')
+        self.assertContains(response, 'Target')
+        self.assertContains(response, 'Build and explain a practical Django feature')
+        self.assertContains(response, 'Evidence target')
+        self.assertContains(response, 'Django mini project with Git history and README')
+        self.assertContains(response, 'Good enough when')
+        self.assertContains(response, 'Core steps')
+        self.assertContains(response, 'Build a Django mini feature')
         self.assertContains(response, '4-6 hours')
-        self.assertContains(response, 'You are done when')
-        self.assertContains(response, 'PROOF OF SKILL')
+        self.assertContains(response, '<details', html=False)
+        self.assertContains(response, '<summary class="fw-semibold" style="color: #1D63ED;">View detailed roadmap</summary>', html=False)
+        self.assertContains(response, 'Proof details')
         self.assertContains(response, 'Minimum features')
         self.assertContains(response, 'working feature')
-        self.assertContains(response, 'Why it matters for recruitment')
-        self.assertContains(response, 'concrete evidence of practical Django ability')
         self.assertContains(response, 'GitLab repository')
         self.assertContains(response, 'Interview talking points')
         self.assertContains(response, 'Design decision')
@@ -1614,13 +1650,15 @@ class InterfaceLanguageTests(SimpleTestCase):
         response = self._post_learning_roadmap(ai_response, 'zh')
 
         self.assertContains(response, '我的 AI 学习路线')
-        self.assertContains(response, '你的学习顺序')
+        self.assertContains(response, '最小可行学习路径')
         self.assertContains(response, '立即开始')
-        self.assertContains(response, '总预计投入')
+        self.assertContains(response, '核心补齐投入')
         self.assertContains(response, '建议节奏')
+        self.assertContains(response, '可以稍后补充')
         self.assertContains(response, '路线策略')
-        self.assertContains(response, '技能证明')
-        self.assertContains(response, '为什么对求职有价值')
+        self.assertContains(response, '证据目标')
+        self.assertContains(response, '达到可用水平的标准')
+        self.assertContains(response, '证明细节')
         self.assertContains(response, '面试讨论要点')
         self.assertContains(response, '简历使用建议')
         self.assertContains(response, '← 返回 AI 优先级')

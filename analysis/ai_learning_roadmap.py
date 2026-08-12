@@ -13,11 +13,13 @@ except ImportError:  # pragma: no cover - exercised in environments without the 
 
 ALLOWED_STAGES = {'now', 'next', 'later'}
 MAX_ROADMAP_SKILLS = 3
-MAX_STEPS_PER_SKILL = 5
+MAX_HIGH_MEDIUM_CORE_STEPS = 3
+MAX_LOW_CORE_STEPS = 1
 MAX_MINIMUM_FEATURES = 8
 MAX_SUGGESTED_EVIDENCE = 6
 MAX_INTERVIEW_TALKING_POINTS = 4
 MAX_LOGGED_API_MESSAGE_LENGTH = 500
+MAX_STRATEGY_LENGTH = 320
 logger = logging.getLogger(__name__)
 
 ROADMAP_RESPONSE_SCHEMA = {
@@ -27,21 +29,13 @@ ROADMAP_RESPONSE_SCHEMA = {
         'summary': {
             'type': 'object',
             'required': [
-                'start_with',
-                'then',
-                'later',
-                'strategy',
-                'total_estimated_hours',
-                'suggested_pace',
                 'immediate_next_action',
+                'core_estimated_hours',
+                'suggested_pace',
+                'can_wait',
+                'strategy',
             ],
             'properties': {
-                'start_with': {'type': 'string'},
-                'then': {'type': 'string'},
-                'later': {'type': 'string'},
-                'strategy': {'type': 'string'},
-                'total_estimated_hours': {'type': 'string'},
-                'suggested_pace': {'type': 'string'},
                 'immediate_next_action': {
                     'type': 'object',
                     'required': ['skill', 'action', 'estimated_hours', 'completion_criteria'],
@@ -52,6 +46,10 @@ ROADMAP_RESPONSE_SCHEMA = {
                         'completion_criteria': {'type': 'string'},
                     },
                 },
+                'core_estimated_hours': {'type': 'string'},
+                'suggested_pace': {'type': 'string'},
+                'can_wait': {'type': 'string'},
+                'strategy': {'type': 'string'},
             },
         },
         'skills': {
@@ -62,63 +60,59 @@ ROADMAP_RESPONSE_SCHEMA = {
                     'skill',
                     'priority',
                     'stage',
-                    'why_now',
-                    'target_competency',
-                    'steps',
-                    'evidence_outcome',
+                    'estimated_hours',
+                    'target_outcome',
+                    'core_steps',
+                    'verification_standard',
+                    'evidence_target',
+                    'details',
                 ],
                 'properties': {
                     'skill': {'type': 'string'},
                     'priority': {'type': 'string'},
                     'stage': {'type': 'string'},
-                    'why_now': {'type': 'string'},
-                    'target_competency': {'type': 'string'},
-                    'steps': {
+                    'estimated_hours': {'type': 'string'},
+                    'target_outcome': {'type': 'string'},
+                    'core_steps': {
                         'type': 'array',
                         'items': {
                             'type': 'object',
                             'required': [
                                 'step_number',
                                 'title',
-                                'learning_objective',
-                                'topics',
                                 'action',
-                                'why_this_step',
                                 'estimated_hours',
                                 'completion_criteria',
+                                'why_this_step',
+                                'topics',
                             ],
                             'properties': {
                                 'step_number': {'type': 'integer'},
                                 'title': {'type': 'string'},
-                                'learning_objective': {'type': 'string'},
-                                'topics': {'type': 'array', 'items': {'type': 'string'}},
                                 'action': {'type': 'string'},
-                                'why_this_step': {'type': 'string'},
                                 'estimated_hours': {'type': 'string'},
                                 'completion_criteria': {'type': 'string'},
+                                'why_this_step': {'type': 'string'},
+                                'topics': {'type': 'array', 'items': {'type': 'string'}},
                             },
                         },
                     },
-                    'evidence_outcome': {
+                    'verification_standard': {'type': 'string'},
+                    'evidence_target': {'type': 'string'},
+                    'details': {
                         'type': 'object',
                         'required': [
-                            'deliverable',
-                            'recruitment_value',
-                            'what_it_demonstrates',
                             'minimum_features',
-                            'suggested_evidence',
+                            'evidence_to_keep',
                             'interview_talking_points',
                             'cv_usage_guidance',
                         ],
                         'properties': {
-                            'deliverable': {'type': 'string'},
-                            'recruitment_value': {'type': 'string'},
-                            'what_it_demonstrates': {'type': 'string'},
                             'minimum_features': {
                                 'type': 'array',
                                 'items': {'type': 'string'},
                             },
-                            'suggested_evidence': {
+                            'evidence_to_keep': {
                                 'type': 'array',
                                 'items': {'type': 'string'},
                             },
@@ -168,6 +162,13 @@ def _require_text_list(value, max_items, field_name):
         _require_text(item, f'{field_name}[{index}]')
         for index, item in enumerate(value)
     ]
+
+
+def _require_concise_text(value, field_name, max_length):
+    text = _require_text(value, field_name)
+    if len(text) > max_length:
+        raise _fail(f'{field_name} exceeds maximum length of {max_length}')
+    return text
 
 
 def _safe_api_message(message, sensitive_fragments):
@@ -274,8 +275,13 @@ def validate_learning_roadmap(response_data, verified_priority_skills):
 
     validated_summary = {
         key: _require_text(summary.get(key), f'summary.{key}')
-        for key in ['start_with', 'then', 'later', 'strategy', 'total_estimated_hours', 'suggested_pace']
+        for key in ['core_estimated_hours', 'suggested_pace', 'can_wait']
     }
+    validated_summary['strategy'] = _require_concise_text(
+        summary.get('strategy'),
+        'summary.strategy',
+        MAX_STRATEGY_LENGTH,
+    )
     verified_lookup = {
         _normalise_skill(skill): skill
         for skill in verified_priority_skills
@@ -300,88 +306,88 @@ def validate_learning_roadmap(response_data, verified_priority_skills):
         if priority not in ALLOWED_PRIORITIES or stage not in ALLOWED_STAGES:
             raise _fail(f'invalid priority or stage for {verified_lookup[normalised_skill]}')
 
-        steps = skill_item.get('steps')
-        if not isinstance(steps, list) or not steps or len(steps) > MAX_STEPS_PER_SKILL:
-            raise _fail(f'steps for {verified_lookup[normalised_skill]} are missing, empty, or excessive')
+        core_steps = skill_item.get('core_steps')
+        max_steps = MAX_LOW_CORE_STEPS if priority == 'low' else MAX_HIGH_MEDIUM_CORE_STEPS
+        if not isinstance(core_steps, list):
+            raise _fail(f'core_steps for {verified_lookup[normalised_skill]} are missing or not a list')
+
+        if priority != 'low' and not core_steps:
+            raise _fail(f'core_steps for {verified_lookup[normalised_skill]} are empty')
+
+        if len(core_steps) > max_steps:
+            raise _fail(f'core_steps for {verified_lookup[normalised_skill]} exceed maximum of {max_steps}')
 
         validated_steps = []
-        for step_index, step in enumerate(steps):
+        for step_index, step in enumerate(core_steps):
             if not isinstance(step, dict):
-                raise _fail(f'steps[{step_index}] for {verified_lookup[normalised_skill]} is not an object')
+                raise _fail(f'core_steps[{step_index}] for {verified_lookup[normalised_skill]} is not an object')
 
             topics = step.get('topics')
             if not isinstance(topics, list) or not topics:
-                raise _fail(f'steps[{step_index}].topics for {verified_lookup[normalised_skill]} is missing or empty')
+                raise _fail(
+                    f'core_steps[{step_index}].topics for {verified_lookup[normalised_skill]} is missing or empty'
+                )
 
             try:
                 step_number = int(step.get('step_number'))
             except (TypeError, ValueError) as exc:
-                raise _fail(f'steps[{step_index}].step_number for {verified_lookup[normalised_skill]} is invalid') from exc
+                raise _fail(
+                    f'core_steps[{step_index}].step_number for {verified_lookup[normalised_skill]} is invalid'
+                ) from exc
 
             validated_steps.append({
                 'step_number': step_number,
-                'title': _require_text(step.get('title'), f'steps[{step_index}].title'),
-                'learning_objective': _require_text(
-                    step.get('learning_objective'),
-                    f'steps[{step_index}].learning_objective',
+                'title': _require_text(step.get('title'), f'core_steps[{step_index}].title'),
+                'action': _require_text(step.get('action'), f'core_steps[{step_index}].action'),
+                'estimated_hours': _require_text(
+                    step.get('estimated_hours'),
+                    f'core_steps[{step_index}].estimated_hours',
                 ),
-                'topics': [
-                    _require_text(topic, f'steps[{step_index}].topics[{topic_index}]')
-                    for topic_index, topic in enumerate(topics)
-                ],
-                'action': _require_text(step.get('action'), f'steps[{step_index}].action'),
-                'why_this_step': _require_text(step.get('why_this_step'), f'steps[{step_index}].why_this_step'),
-                'estimated_hours': _require_text(step.get('estimated_hours'), f'steps[{step_index}].estimated_hours'),
                 'completion_criteria': _require_text(
                     step.get('completion_criteria'),
-                    f'steps[{step_index}].completion_criteria',
+                    f'core_steps[{step_index}].completion_criteria',
                 ),
+                'why_this_step': _require_text(step.get('why_this_step'), f'core_steps[{step_index}].why_this_step'),
+                'topics': [
+                    _require_text(topic, f'core_steps[{step_index}].topics[{topic_index}]')
+                    for topic_index, topic in enumerate(topics)
+                ],
             })
 
-        evidence_outcome = skill_item.get('evidence_outcome')
-        if not isinstance(evidence_outcome, dict):
-            raise _fail(f'evidence_outcome for {verified_lookup[normalised_skill]} is missing or not an object')
+        details = skill_item.get('details')
+        if not isinstance(details, dict):
+            raise _fail(f'details for {verified_lookup[normalised_skill]} is missing or not an object')
 
         seen_skills.add(normalised_skill)
         validated_skills.append({
             'skill': verified_lookup[normalised_skill],
             'priority': priority,
             'stage': stage,
-            'why_now': _require_text(skill_item.get('why_now'), f'skills[{skill_index}].why_now'),
-            'target_competency': _require_text(
-                skill_item.get('target_competency'),
-                f'skills[{skill_index}].target_competency',
+            'estimated_hours': _require_text(skill_item.get('estimated_hours'), f'skills[{skill_index}].estimated_hours'),
+            'target_outcome': _require_text(skill_item.get('target_outcome'), f'skills[{skill_index}].target_outcome'),
+            'core_steps': validated_steps,
+            'verification_standard': _require_text(
+                skill_item.get('verification_standard'),
+                f'skills[{skill_index}].verification_standard',
             ),
-            'steps': validated_steps,
-            'evidence_outcome': {
-                'deliverable': _require_text(evidence_outcome.get('deliverable'), 'evidence_outcome.deliverable'),
-                'recruitment_value': _require_text(
-                    evidence_outcome.get('recruitment_value'),
-                    'evidence_outcome.recruitment_value',
-                ),
-                'what_it_demonstrates': _require_text(
-                    evidence_outcome.get('what_it_demonstrates'),
-                    'evidence_outcome.what_it_demonstrates',
-                ),
+            'evidence_target': _require_text(skill_item.get('evidence_target'), f'skills[{skill_index}].evidence_target'),
+            'details': {
                 'minimum_features': _require_text_list(
-                    evidence_outcome.get('minimum_features'),
+                    details.get('minimum_features'),
                     MAX_MINIMUM_FEATURES,
-                    'evidence_outcome.minimum_features',
+                    'details.minimum_features',
                 ),
-                'suggested_evidence': _require_text_list(
-                    evidence_outcome.get('suggested_evidence'),
+                'evidence_to_keep': _require_text_list(
+                    details.get('evidence_to_keep'),
                     MAX_SUGGESTED_EVIDENCE,
-                    'evidence_outcome.suggested_evidence',
+                    'details.evidence_to_keep',
                 ),
                 'interview_talking_points': _require_text_list(
-                    evidence_outcome.get('interview_talking_points'),
+                    details.get('interview_talking_points'),
                     MAX_INTERVIEW_TALKING_POINTS,
-                    'evidence_outcome.interview_talking_points',
+                    'details.interview_talking_points',
                 ),
-                'cv_usage_guidance': _require_text(
-                    evidence_outcome.get('cv_usage_guidance'),
-                    'evidence_outcome.cv_usage_guidance',
-                ),
+                'cv_usage_guidance': _require_text(details.get('cv_usage_guidance'), 'details.cv_usage_guidance'),
             },
         })
 
@@ -442,34 +448,38 @@ def generate_learning_roadmap(results, language='en'):
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=(
-                'Create a concrete, personalised learning roadmap only for the verified priority gaps supplied. '
-                'Do not add new skills, invent CV experience, invent job requirements, guarantee employment, or '
-                'invent academic citations. Use technically accurate terminology; for example, describe Django '
-                'with its Model-Template-View structure rather than inaccurately calling it MVC. Avoid duplicated '
-                'phrases and exaggerated claims. Use prerequisite sequencing, progressive complexity, active '
-                'learning, demonstration of competence, and evidence-based outcomes. Maintain the order: learn, '
-                'practise, build, verify, then preserve evidence. Build on existing verified skills where useful, '
-                'but do not reteach skills the user already demonstrably has except as context. '
-                'Make the summary execution-focused: total_estimated_hours should be an approximate range, '
-                'suggested_pace should be practical, and immediate_next_action should be the first concrete task '
-                'the user can do today, normally from the first step of the highest-priority skill. '
+                'Create a concise Minimum Viable Learning Path only for the verified priority gaps supplied. '
+                'Optimise for employability progress, not comprehensive mastery. Estimate the minimum focused '
+                'effort required for this user, given their existing verified skills and the target job evidence, '
+                'to build credible role-relevant proof of the missing skill. Do not create a full course curriculum. '
+                'Avoid inflated plans such as 80-90 hours for junior-role gaps unless the provided job evidence truly '
+                'requires it. Do not add new skills, invent CV experience, invent job requirements, guarantee '
+                'employment, or invent academic citations. Use technically accurate terminology; for example, '
+                'describe Django with its Model-Template-View structure rather than inaccurately calling it MVC. '
+                'Avoid duplicated phrases and exaggerated claims. Maintain the order: learn only what is necessary, '
+                'practise, build a small artifact, verify competence, then preserve evidence. Build on existing '
+                'verified skills where useful, but do not reteach skills the user already demonstrably has except '
+                'as context. '
+                'Make the summary compact: core_estimated_hours should cover the focused gap-closing path, '
+                'suggested_pace should be practical, can_wait should name optional or lower-priority work that does '
+                'not need to block applications, and strategy must be 1-2 short sentences. immediate_next_action '
+                'should be the first concrete task the user can do today. '
                 'Machine-readable fields must stay canonical English regardless of output language: priority must '
                 'be exactly one of high, medium, low; stage must be exactly one of now, next, later. Do not translate '
                 'these two field values into Chinese or any other language. User-facing prose fields should use the '
                 'selected output language. '
-                'Allocate depth by priority: high priority usually needs 3-5 detailed steps, medium priority 2-4 '
-                'steps, and low priority 1-2 focused steps or a clear recommendation to delay it. '
-                'Each action must describe something observable the learner physically does, such as creating, '
+                'Priority controls depth: high priority normally needs 2-3 core_steps, medium priority 1-3 core_steps, '
+                'and low priority 0-1 optional future step. Low-priority desirable skills can be stage later and '
+                'explicitly not required before applying. Do not imply the user must complete every item before '
+                'applying; distinguish core required evidence from optional later learning. '
+                'Each core step must describe something observable the learner physically does, such as creating, '
                 'implementing, debugging, testing, explaining, comparing, documenting, or refactoring. Completion '
-                'criteria must show independent competence and should not be merely watching a tutorial or saying '
-                'the user understands the topic. '
-                'Evidence outcomes are critical: choose role-relevant deliverables that could support a portfolio, '
-                'GitHub or GitLab profile, interview discussion, technical screening, or recruiter review. Avoid '
-                'generic beginner artifacts such as hello-world apps, copied tutorial projects, trivial todo lists, '
-                'or a basic personal blog when a more role-relevant artifact is possible. Explain recruitment_value '
-                'realistically without promising interviews, jobs, recruiter approval, production scale, or business '
-                'impact. For cv_usage_guidance, never transform a planned learning task into existing CV experience; '
-                'only explain how it could be used after the user has actually completed and tested the work. '
+                'criteria must show practical independent competence, not expert mastery. '
+                'Every skill must have a concise target_outcome, estimated_hours, verification_standard, and one '
+                'primary evidence_target. Evidence should support a CV project section, portfolio, GitHub or GitLab, '
+                'or interview discussion. Avoid generic beginner artifacts when a role-relevant artifact is possible. '
+                'For cv_usage_guidance, never transform planned learning into existing CV experience; only explain '
+                'how it could be used after the user has actually completed and tested the work. Keep all prose concise. '
                 f'Write roadmap prose in {selected_language}; keep technical skill names natural.\n\n'
                 + json.dumps(roadmap_input, ensure_ascii=False)
             ),
