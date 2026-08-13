@@ -1,0 +1,89 @@
+{% load static %}
+<!doctype html>
+<html lang="{{ text.html_lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ text.landing_page_title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <main class="container py-4 py-md-5">
+        <header class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center justify-content-between gap-3 mb-5 mx-auto" style="max-width: 1120px;">
+            <a class="d-inline-flex align-items-center" href="{% url 'analysis:landing' %}?lang={{ language }}" aria-label="FitGap">
+                <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
+            </a>
+            <nav class="small" aria-label="Language selection">
+                <span class="text-muted me-2">{{ text.language_switch_label }}</span>
+                {% if language == 'en' %}
+                    <strong aria-current="page" class="text-dark">English</strong>
+                {% else %}
+                    <a href="{% url 'analysis:landing' %}?lang=en">English</a>
+                {% endif %}
+                <span class="text-muted mx-2">|</span>
+                {% if language == 'zh' %}
+                    <strong aria-current="page" class="text-dark">简体中文</strong>
+                {% else %}
+                    <a href="{% url 'analysis:landing' %}?lang=zh">简体中文</a>
+                {% endif %}
+            </nav>
+        </header>
+
+        <section class="text-center mx-auto mb-5" style="max-width: 820px;" aria-labelledby="landing-heading">
+            <strong class="d-inline-block fs-5 fw-bold mb-3 text-dark">{{ text.hero_product_label }}</strong>
+            <h1 id="landing-heading" class="display-4 fw-bold mb-3" style="color: #1D63ED;">{{ text.hero_headline }}</h1>
+            <p class="lead text-secondary mb-0">
+                {{ text.hero_supporting_text }}
+                <strong class="fw-bold" style="color: #1D63ED;">{{ text.hero_value_statement }}</strong>
+            </p>
+        </section>
+
+        <section class="mx-auto mb-5" style="max-width: 960px;" aria-label="FitGap entry options">
+            <div class="row g-3 align-items-stretch">
+                <div class="col-12 col-lg-7">
+                    <div class="h-100 p-4 p-md-5 rounded-3 bg-white border">
+                        <h2 class="h3 fw-bold mb-3">{{ text.landing_try_free }}</h2>
+                        <p class="text-secondary mb-4">{{ text.landing_try_free_support }}</p>
+                        <a href="{% url 'analysis:input' %}?lang={{ language }}" class="btn btn-primary btn-lg" style="background-color: #1D63ED; border-color: #1D63ED;">
+                            {{ text.landing_try_free }}
+                        </a>
+                    </div>
+                </div>
+                <div class="col-12 col-lg-5">
+                    <div class="h-100 p-4 p-md-5 rounded-3 bg-white border">
+                        <span class="badge text-bg-light border mb-3">{{ text.landing_account_preview }}</span>
+                        <h2 class="h4 fw-bold mb-3">{{ text.landing_account_cta }}</h2>
+                        <p class="text-secondary mb-4">{{ text.landing_account_support }}</p>
+                        <a href="{% url 'analysis:account_entry' %}?lang={{ language }}" class="btn btn-outline-primary">
+                            {{ text.landing_account_cta }}
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="mx-auto" style="max-width: 960px;" aria-label="FitGap value summary">
+            <div class="row g-3">
+                <div class="col-12 col-md-4">
+                    <div class="h-100 p-4 rounded-3 bg-white border">
+                        <h2 class="h5 fw-bold">{{ text.landing_value_1_title }}</h2>
+                        <p class="mb-0 text-secondary">{{ text.landing_value_1_text }}</p>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="h-100 p-4 rounded-3 bg-white border">
+                        <h2 class="h5 fw-bold">{{ text.landing_value_2_title }}</h2>
+                        <p class="mb-0 text-secondary">{{ text.landing_value_2_text }}</p>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="h-100 p-4 rounded-3 bg-white border">
+                        <h2 class="h5 fw-bold">{{ text.landing_value_3_title }}</h2>
+                        <p class="mb-0 text-secondary">{{ text.landing_value_3_text }}</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

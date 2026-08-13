@@ -5,7 +5,9 @@ from . import views
 app_name = 'analysis'
 
 urlpatterns = [
-    path('', views.input_view, name='input'),
+    path('', views.landing_view, name='landing'),
+    path('analyse/', views.input_view, name='input'),
+    path('account/', views.account_entry_view, name='account_entry'),
     path('extract-document-text/', views.extract_document_text_view, name='extract_document_text'),
     path('results/ai-prioritise/', views.ai_prioritise_view, name='ai_prioritise'),
     path('results/ai-results/', views.ai_results_view, name='ai_results'),

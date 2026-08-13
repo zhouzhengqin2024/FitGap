@@ -199,7 +199,7 @@ class DocumentExtractionTests(SimpleTestCase):
             {'document': _uploaded_file('cv.txt', b'Python SQL Git')},
         )
         extracted_text = extraction_response.json()['text']
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': extracted_text,
             'job_description_text': 'Python SQL Django',
             'output_language': 'en',
@@ -214,7 +214,7 @@ class DocumentExtractionTests(SimpleTestCase):
             {'document': _uploaded_file('jd.txt', b'Python SQL Django')},
         )
         extracted_text = extraction_response.json()['text']
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL Git',
             'job_description_text': extracted_text,
             'output_language': 'en',
@@ -224,7 +224,7 @@ class DocumentExtractionTests(SimpleTestCase):
         self.assertContains(response, 'Complete a beginner Django tutorial')
 
     def test_pasted_text_only_workflow_remains_valid(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL Git',
             'job_description_text': 'Python SQL Django',
             'output_language': 'en',
@@ -1157,7 +1157,7 @@ class LearningRoadmapServiceTests(SimpleTestCase):
 
 class InterfaceLanguageTests(SimpleTestCase):
     def _results_response(self, language='en', cv_text='Python SQL Git', job_description_text='Python SQL Django REST APIs JavaScript'):
-        return self.client.post(f'/?lang={language}', data={
+        return self.client.post(f'/analyse/?lang={language}', data={
             'cv_text': cv_text,
             'job_description_text': job_description_text,
             'output_language': language,
@@ -1193,8 +1193,104 @@ class InterfaceLanguageTests(SimpleTestCase):
             'output_language': language,
         })
 
-    def test_english_input_page(self):
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_english_landing_page_renders_entry_experience(self, mock_prioritise, mock_roadmap):
         response = self.client.get('/?lang=en')
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/landing.html')
+        self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
+        self.assertContains(response, 'AI Career Skill-Gap Assistant')
+        self.assertContains(response, 'See Your Skill Gaps in Just Three Steps. Know What to Do Next.')
+        self.assertContains(response, 'Try FitGap Free →')
+        self.assertContains(response, 'No account required. Analyse your CV and target role first.')
+        self.assertContains(response, 'href="/analyse/?lang=en"')
+        self.assertContains(response, 'Sign In / Create Account')
+        self.assertContains(response, 'href="/account/?lang=en"')
+        self.assertContains(response, 'Identify the Gap')
+        self.assertContains(response, 'Prioritise What Matters')
+        self.assertContains(response, 'Build a Clear Path')
+        self.assertContains(response, 'href="/?lang=zh"')
+        self.assertNotContains(response, 'fake user')
+        self.assertNotContains(response, 'trusted by')
+        self.assertNotContains(response, 'Pricing')
+
+    def test_chinese_landing_page_renders_entry_experience(self):
+        response = self.client.get('/?lang=zh')
+
+        self.assertTemplateUsed(response, 'analysis/landing.html')
+        self.assertContains(response, 'AI 求职技能差距助手')
+        self.assertContains(response, '看清技能差距，仅需三步，知道下一步怎么做。')
+        self.assertContains(response, '免费体验一次 →')
+        self.assertContains(response, '无需注册，先体验完整的技能差距分析流程。')
+        self.assertContains(response, 'href="/analyse/?lang=zh"')
+        self.assertContains(response, '登录 / 注册')
+        self.assertContains(response, 'href="/account/?lang=zh"')
+        self.assertContains(response, '识别差距')
+        self.assertContains(response, '明确优先级')
+        self.assertContains(response, '形成行动路径')
+        self.assertContains(response, 'href="/?lang=en"')
+
+    def test_landing_language_switch_stays_on_landing_page(self):
+        response = self.client.get('/?lang=en')
+
+        self.assertContains(response, 'href="/?lang=zh"')
+        self.assertNotContains(response, 'href="/analyse/?lang=zh">简体中文</a>')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_english_account_entry_page_renders_without_ai_calls(self, mock_prioritise, mock_roadmap):
+        response = self.client.get('/account/?lang=en')
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/account_entry.html')
+        self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
+        self.assertContains(response, 'Welcome to FitGap')
+        self.assertContains(response, 'Sign In')
+        self.assertContains(response, 'Create Account')
+        self.assertContains(response, 'New to FitGap?')
+        self.assertContains(response, 'Email')
+        self.assertContains(response, 'Password')
+        self.assertContains(response, 'Confirm password')
+        self.assertContains(response, 'Account features will support:')
+        self.assertContains(response, 'Save previous analyses')
+        self.assertContains(response, '← Back to FitGap')
+        self.assertContains(response, 'href="/?lang=en"')
+        self.assertContains(response, 'href="/account/?lang=zh"')
+
+    def test_chinese_account_entry_page_renders(self):
+        response = self.client.get('/account/?lang=zh')
+
+        self.assertContains(response, '欢迎使用 FitGap')
+        self.assertContains(response, '登录')
+        self.assertContains(response, '创建账号')
+        self.assertContains(response, '第一次使用 FitGap？')
+        self.assertContains(response, '邮箱')
+        self.assertContains(response, '密码')
+        self.assertContains(response, '确认密码')
+        self.assertContains(response, 'FitGap 账号后续将支持：')
+        self.assertContains(response, '保存历史分析')
+        self.assertContains(response, '← 返回 FitGap')
+        self.assertContains(response, 'href="/?lang=zh"')
+        self.assertContains(response, 'href="/account/?lang=en"')
+
+    def test_account_post_shows_prototype_message_without_authentication(self):
+        response = self.client.post('/account/?lang=en', data={
+            'email': 'student@example.com',
+            'password': 'not-stored',
+            'confirm_password': 'not-stored',
+        })
+
+        self.assertContains(response, 'Account access will be enabled in the next product iteration.')
+        self.assertNotContains(response, 'successfully signed in')
+        self.assertNotContains(response, 'logged in')
+        self.assertNotIn('sessionid', self.client.cookies)
+
+    def test_english_input_page(self):
+        response = self.client.get('/analyse/?lang=en')
 
         self.assertContains(response, 'CV and Job Description Input')
         self.assertContains(response, 'Interface and Output Language')
@@ -1247,10 +1343,10 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'View analysis results')
         self.assertNotContains(response, 'View Prototype Results')
         self.assertNotContains(response, 'prototype result')
-        self.assertContains(response, 'href="/?lang=zh"')
+        self.assertContains(response, 'href="/analyse/?lang=zh"')
 
     def test_chinese_input_page(self):
-        response = self.client.get('/?lang=zh')
+        response = self.client.get('/analyse/?lang=zh')
 
         self.assertContains(response, '简历和职位描述输入')
         self.assertContains(response, '界面和输出语言')
@@ -1299,10 +1395,10 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '未选择文件')
         self.assertContains(response, '查看分析结果')
         self.assertNotContains(response, '查看原型结果')
-        self.assertContains(response, 'href="/?lang=en"')
+        self.assertContains(response, 'href="/analyse/?lang=en"')
 
     def test_fitgap_brand_logo_renders_from_static_asset(self):
-        response = self.client.get('/?lang=en')
+        response = self.client.get('/analyse/?lang=en')
 
         self.assertContains(response, 'FitGap')
         self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
@@ -1349,13 +1445,13 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertIn('<title id="fitgap-logo-title">FitGap</title>', content)
 
     def test_textareas_still_render_on_input_page(self):
-        response = self.client.get('/?lang=en')
+        response = self.client.get('/analyse/?lang=en')
 
         self.assertContains(response, 'name="cv_text"')
         self.assertContains(response, 'name="job_description_text"')
 
     def test_header_has_no_fake_navigation_links(self):
-        response = self.client.get('/?lang=en')
+        response = self.client.get('/analyse/?lang=en')
 
         self.assertNotContains(response, 'Features')
         self.assertNotContains(response, 'Pricing')
@@ -1365,7 +1461,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertNotContains(response, 'Sign up')
 
     def test_native_file_inputs_still_exist_and_are_visually_hidden(self):
-        response = self.client.get('/?lang=en')
+        response = self.client.get('/analyse/?lang=en')
 
         self.assertContains(response, 'type="file"', count=2)
         self.assertContains(response, 'name="cv_file"')
@@ -1373,13 +1469,13 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'class="visually-hidden document-upload-input"', count=2)
 
     def test_accepted_file_extensions_remain_unchanged(self):
-        response = self.client.get('/?lang=en')
+        response = self.client.get('/analyse/?lang=en')
         accept_value = '.pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain'
 
         self.assertContains(response, f'accept="{accept_value}"', count=2)
 
     def test_cv_and_job_description_custom_controls_have_distinct_identifiers(self):
-        response = self.client.get('/?lang=en')
+        response = self.client.get('/analyse/?lang=en')
 
         self.assertContains(response, 'id="id_cv_file_filename"')
         self.assertContains(response, 'id="id_job_description_file_filename"')
@@ -1387,7 +1483,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'data-file-input="id_job_description_file"')
 
     def test_existing_analysis_workflow_remains_intact_after_hero_addition(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL Git',
             'job_description_text': 'Python SQL Django',
             'output_language': 'en',
@@ -1890,7 +1986,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'Django is the only verified gap.')
 
     def test_english_results_page(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL Git',
             'job_description_text': 'Python Django SQL',
             'output_language': 'en',
@@ -1912,7 +2008,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '<span class="badge text-bg-warning">Missing</span>', html=True)
 
     def test_duplicated_plain_matched_and_missing_skill_lists_are_removed(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL Git',
             'job_description_text': 'Python Django SQL',
             'output_language': 'en',
@@ -1933,7 +2029,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertIn('View explanation', missing_section)
 
     def test_chinese_results_page(self):
-        response = self.client.post('/?lang=zh', data={
+        response = self.client.post('/analyse/?lang=zh', data={
             'cv_text': 'Python SQL Git',
             'job_description_text': 'Python Django SQL',
             'output_language': 'zh',
@@ -1955,7 +2051,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '<span class="badge text-bg-warning">缺失</span>', html=True)
 
     def test_exact_matched_term_is_highlighted_safely(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': '<script>alert(1)</script> Used GitLab safely.',
             'job_description_text': 'Git is required.',
             'output_language': 'en',
@@ -1967,7 +2063,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertNotIn('<script>alert(1)</script>', content)
 
     def test_english_no_missing_skills_recommendation_message(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL Django',
             'job_description_text': 'Python Django SQL',
             'output_language': 'en',
@@ -1979,7 +2075,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         )
 
     def test_chinese_no_missing_skills_recommendation_message(self):
-        response = self.client.post('/?lang=zh', data={
+        response = self.client.post('/analyse/?lang=zh', data={
             'cv_text': 'Python SQL Django',
             'job_description_text': 'Python Django SQL',
             'output_language': 'zh',
@@ -1988,7 +2084,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '没有需要生成的学习建议，因为未发现缺失的岗位技能。')
 
     def test_realistic_input_generates_rule_based_recommendations(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Developer with Python, SQL, GitLab, HTML5, CSS3, and Bootstrap experience.',
             'job_description_text': 'The role requires Django, REST APIs, PostgreSQL, Git, and JavaScript.',
             'output_language': 'en',
@@ -2002,7 +2098,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         )
 
     def test_end_to_end_result_context_includes_structured_evidence_details(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python developer. Used GitLab for collaboration.',
             'job_description_text': 'Needs Python, Git, and Django experience.',
             'output_language': 'en',
@@ -2023,7 +2119,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         )
 
     def test_english_zero_job_description_skill_explanation(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL',
             'job_description_text': 'communication teamwork',
             'output_language': 'en',
@@ -2033,7 +2129,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'No recognised job-description skills were found')
 
     def test_chinese_zero_job_description_skill_explanation(self):
-        response = self.client.post('/?lang=zh', data={
+        response = self.client.post('/analyse/?lang=zh', data={
             'cv_text': 'Python SQL',
             'job_description_text': 'communication teamwork',
             'output_language': 'zh',
@@ -2043,17 +2139,17 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '岗位描述中未识别出技能')
 
     def test_language_preservation_after_post(self):
-        response = self.client.post('/?lang=en', data={
+        response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL',
             'job_description_text': 'Python Django',
             'output_language': 'zh',
         })
 
         self.assertContains(response, '分析结果')
-        self.assertContains(response, 'href="/?lang=zh"')
+        self.assertContains(response, 'href="/analyse/?lang=zh"')
 
     def test_chinese_required_field_validation_messages(self):
-        response = self.client.post('/?lang=zh', data={
+        response = self.client.post('/analyse/?lang=zh', data={
             'cv_text': '',
             'job_description_text': '',
             'output_language': 'zh',
@@ -2064,17 +2160,17 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, '简历和职位描述输入')
 
     def test_invalid_language_falls_back_to_english(self):
-        response = self.client.get('/?lang=unsupported')
+        response = self.client.get('/analyse/?lang=unsupported')
 
         self.assertContains(response, 'CV and Job Description Input')
         self.assertContains(response, 'View analysis results')
 
     def test_run_another_analysis_preserves_selected_language(self):
-        response = self.client.post('/?lang=zh', data={
+        response = self.client.post('/analyse/?lang=zh', data={
             'cv_text': 'Python',
             'job_description_text': 'Django',
             'output_language': 'zh',
         })
 
-        self.assertContains(response, 'href="/?lang=zh"')
+        self.assertContains(response, 'href="/analyse/?lang=zh"')
         self.assertContains(response, '再次分析')

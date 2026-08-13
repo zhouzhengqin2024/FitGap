@@ -164,6 +164,36 @@ def _build_roadmap_status(status, text):
     }
 
 
+def landing_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    return render(
+        request,
+        'analysis/landing.html',
+        {
+            'language': language,
+            'text': text,
+        },
+    )
+
+
+def account_entry_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+    account_message = text['account_prototype_message'] if request.method == 'POST' else ''
+
+    return render(
+        request,
+        'analysis/account_entry.html',
+        {
+            'account_message': account_message,
+            'language': language,
+            'text': text,
+        },
+    )
+
+
 @require_POST
 def extract_document_text_view(request):
     language = _get_selected_language(request)
