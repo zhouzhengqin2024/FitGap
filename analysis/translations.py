@@ -35,6 +35,8 @@ TRANSLATIONS = {
         'account_page_title': 'FitGap Account Entry',
         'account_heading': 'Welcome to FitGap',
         'account_intro': 'Save your analyses and return to your learning plans whenever you need them.',
+        'account_roadmap_heading': 'Unlock Your Personalised Learning Roadmap',
+        'account_roadmap_intro': 'Create an account or sign in to continue from your current skill priorities.',
         'account_preview_label': 'Account preview',
         'account_sign_in': 'Sign In',
         'account_create': 'Create Account',
@@ -153,6 +155,19 @@ TRANSLATIONS = {
             'each skill.'
         ),
         'roadmap_cta_button': '✨ Build My AI Learning Roadmap →',
+        'roadmap_gate_label': 'ACCOUNT ACCESS REQUIRED',
+        'roadmap_gate_message': (
+            "You've identified your highest-priority skill gaps. Create a free FitGap account to unlock your "
+            'personalised learning roadmap, save this analysis, and return to it later.'
+        ),
+        'roadmap_gate_benefit_1': 'Get a personalised learning roadmap',
+        'roadmap_gate_benefit_2': 'See exactly what to learn and in what order',
+        'roadmap_gate_benefit_3': 'Know when each skill is good enough for your target role',
+        'roadmap_gate_benefit_4': 'Build evidence you can use in applications and interviews',
+        'roadmap_gate_benefit_5': 'Save your analysis and return to it later',
+        'roadmap_gate_primary_cta': 'Create Free Account & Build My Roadmap →',
+        'roadmap_gate_secondary_cta': 'Already have an account? Sign in',
+        'roadmap_gate_no_payment': 'No payment required.',
         'roadmap_unavailable': (
             'AI learning roadmap is temporarily unavailable. Your prioritised skill gaps are still available above, '
             'and you can try generating the roadmap again.'
@@ -222,6 +237,8 @@ TRANSLATIONS = {
         'account_page_title': 'FitGap 账号入口',
         'account_heading': '欢迎使用 FitGap',
         'account_intro': '保存你的分析记录，并随时回来继续查看学习路线。',
+        'account_roadmap_heading': '解锁你的个性化学习路线',
+        'account_roadmap_intro': '注册或登录后，即可从当前技能优先级继续生成学习路线。',
         'account_preview_label': '账号功能预览',
         'account_sign_in': '登录',
         'account_create': '创建账号',
@@ -317,6 +334,18 @@ TRANSLATIONS = {
         'roadmap_cta_intro': '你已经知道哪些技能差距最重要。现在根据目标岗位和现有技能，将它们转化为个性化、可执行的分步学习计划。',
         'roadmap_cta_value': '获得明确的学习目标、具体任务、预计投入时间，以及能够证明技能掌握程度的成果。',
         'roadmap_cta_button': '✨ 生成我的 AI 学习路线 →',
+        'roadmap_gate_label': '需要账号权限',
+        'roadmap_gate_message': (
+            '你已经找到了最值得优先补齐的技能。创建免费 FitGap 账号，即可解锁个性化 AI 学习路线，保存本次分析，并在之后随时回来继续查看。'
+        ),
+        'roadmap_gate_benefit_1': '获得个性化 AI 学习路线',
+        'roadmap_gate_benefit_2': '明确每项技能该学什么、先学什么',
+        'roadmap_gate_benefit_3': '知道做到什么程度才足以满足目标岗位',
+        'roadmap_gate_benefit_4': '建立可用于求职和面试的能力证明',
+        'roadmap_gate_benefit_5': '保存本次分析，之后随时回来查看',
+        'roadmap_gate_primary_cta': '免费注册并生成学习路线 →',
+        'roadmap_gate_secondary_cta': '已有账号？登录',
+        'roadmap_gate_no_payment': '无需付费。',
         'roadmap_unavailable': 'AI 学习路线暂时不可用。你仍可查看上方已经生成的技能优先级，并可以稍后再次尝试生成学习路线。',
         'roadmap_no_priorities': '当前没有可用于生成学习路线的 AI 优先级技能。',
         'roadmap_page_title': '我的 AI 学习路线',

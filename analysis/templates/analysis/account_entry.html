@@ -18,13 +18,13 @@
                 {% if language == 'en' %}
                     <strong aria-current="page" class="text-dark">English</strong>
                 {% else %}
-                    <a href="{% url 'analysis:account_entry' %}?lang=en">English</a>
+                    <a href="{% url 'analysis:account_entry' %}?lang=en{% if roadmap_intent %}&amp;intent=roadmap{% endif %}">English</a>
                 {% endif %}
                 <span class="text-muted mx-2">|</span>
                 {% if language == 'zh' %}
                     <strong aria-current="page" class="text-dark">简体中文</strong>
                 {% else %}
-                    <a href="{% url 'analysis:account_entry' %}?lang=zh">简体中文</a>
+                    <a href="{% url 'analysis:account_entry' %}?lang=zh{% if roadmap_intent %}&amp;intent=roadmap{% endif %}">简体中文</a>
                 {% endif %}
             </nav>
         </header>
@@ -33,8 +33,12 @@
             <div class="col-12 col-lg-11 col-xl-10">
                 <section class="text-center mx-auto mb-5" style="max-width: 760px;" aria-labelledby="account-heading">
                     <span class="badge text-bg-light border mb-3">{{ text.account_preview_label }}</span>
-                    <h1 id="account-heading" class="display-5 fw-bold mb-3" style="color: #1D63ED;">{{ text.account_heading }}</h1>
-                    <p class="lead text-secondary mb-0">{{ text.account_intro }}</p>
+                    <h1 id="account-heading" class="display-5 fw-bold mb-3" style="color: #1D63ED;">
+                        {% if roadmap_intent %}{{ text.account_roadmap_heading }}{% else %}{{ text.account_heading }}{% endif %}
+                    </h1>
+                    <p class="lead text-secondary mb-0">
+                        {% if roadmap_intent %}{{ text.account_roadmap_intro }}{% else %}{{ text.account_intro }}{% endif %}
+                    </p>
                 </section>
 
                 {% if account_message %}
@@ -47,7 +51,7 @@
                             <div class="col-12 col-md-6">
                                 <section class="h-100 p-4 rounded-3 bg-white border" aria-labelledby="signin-heading">
                                     <h2 id="signin-heading" class="h4 fw-bold mb-3">{{ text.account_sign_in }}</h2>
-                                    <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}">
+                                    <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}{% if roadmap_intent %}&amp;intent=roadmap{% endif %}">
                                         {% csrf_token %}
                                         <div class="mb-3">
                                             <label for="signin-email" class="form-label">{{ text.account_email }}</label>
@@ -65,7 +69,7 @@
                                 <section class="h-100 p-4 rounded-3 bg-white border" aria-labelledby="create-heading">
                                     <p class="small text-muted mb-1">{{ text.account_new_user }}</p>
                                     <h2 id="create-heading" class="h4 fw-bold mb-3">{{ text.account_create }}</h2>
-                                    <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}">
+                                    <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}{% if roadmap_intent %}&amp;intent=roadmap{% endif %}">
                                         {% csrf_token %}
                                         <div class="mb-3">
                                             <label for="create-email" class="form-label">{{ text.account_email }}</label>

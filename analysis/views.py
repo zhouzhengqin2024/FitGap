@@ -181,6 +181,7 @@ def landing_view(request):
 def account_entry_view(request):
     language = _get_selected_language(request)
     text = get_translations(language)
+    roadmap_intent = request.GET.get('intent') == 'roadmap'
     account_message = text['account_prototype_message'] if request.method == 'POST' else ''
 
     return render(
@@ -189,6 +190,7 @@ def account_entry_view(request):
         {
             'account_message': account_message,
             'language': language,
+            'roadmap_intent': roadmap_intent,
             'text': text,
         },
     )

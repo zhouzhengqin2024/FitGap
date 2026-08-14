@@ -1277,6 +1277,28 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'href="/?lang=zh"')
         self.assertContains(response, 'href="/account/?lang=en"')
 
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_english_roadmap_account_gate_context_renders_without_ai_calls(self, mock_prioritise, mock_roadmap):
+        response = self.client.get('/account/?lang=en&intent=roadmap')
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/account_entry.html')
+        self.assertContains(response, 'Unlock Your Personalised Learning Roadmap')
+        self.assertContains(response, 'Create an account or sign in to continue from your current skill priorities.')
+        self.assertContains(response, 'href="/account/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'action="/account/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertNotContains(response, 'My AI Learning Roadmap')
+
+    def test_chinese_roadmap_account_gate_context_renders(self):
+        response = self.client.get('/account/?lang=zh&intent=roadmap')
+
+        self.assertContains(response, '解锁你的个性化学习路线')
+        self.assertContains(response, '注册或登录后，即可从当前技能优先级继续生成学习路线。')
+        self.assertContains(response, 'href="/account/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'action="/account/?lang=zh&amp;intent=roadmap"', html=False)
+
     def test_account_post_shows_prototype_message_without_authentication(self):
         response = self.client.post('/account/?lang=en', data={
             'email': 'student@example.com',
@@ -1287,6 +1309,17 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'Account access will be enabled in the next product iteration.')
         self.assertNotContains(response, 'successfully signed in')
         self.assertNotContains(response, 'logged in')
+        self.assertNotIn('sessionid', self.client.cookies)
+
+    def test_roadmap_account_gate_post_preserves_context_without_authentication(self):
+        response = self.client.post('/account/?lang=en&intent=roadmap', data={
+            'email': 'student@example.com',
+            'password': 'not-stored',
+            'confirm_password': 'not-stored',
+        })
+
+        self.assertContains(response, 'Unlock Your Personalised Learning Roadmap')
+        self.assertContains(response, 'Account access will be enabled in the next product iteration.')
         self.assertNotIn('sessionid', self.client.cookies)
 
     def test_english_input_page(self):
@@ -1631,7 +1664,7 @@ class InterfaceLanguageTests(SimpleTestCase):
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
-    def test_ai_results_page_displays_learning_roadmap_cta(self, mock_prioritise, mock_roadmap):
+    def test_ai_results_page_displays_registration_gate_for_learning_roadmap(self, mock_prioritise, mock_roadmap):
         mock_prioritise.return_value = [
             {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
         ]
@@ -1641,12 +1674,18 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'Turn Your Priorities into Action')
         self.assertContains(
             response,
-            'You know which skill gaps matter most. Now turn them into a personalised, step-by-step learning plan based on your target role and existing skills.',
+            'You&#x27;ve identified your highest-priority skill gaps. Create a free FitGap account to unlock your personalised learning roadmap, save this analysis, and return to it later.',
+            html=False,
         )
-        self.assertContains(response, 'Get clear learning goals, practical tasks, estimated effort and evidence')
-        self.assertContains(response, '✨ Build My AI Learning Roadmap →')
-        self.assertContains(response, 'action="/results/ai-learning-roadmap/?lang=en"')
-        self.assertContains(response, 'name="analysis_payload"')
+        self.assertContains(response, 'ACCOUNT ACCESS REQUIRED')
+        self.assertContains(response, 'Get a personalised learning roadmap')
+        self.assertContains(response, 'See exactly what to learn and in what order')
+        self.assertContains(response, 'Create Free Account &amp; Build My Roadmap →', html=False)
+        self.assertContains(response, 'Already have an account? Sign in')
+        self.assertContains(response, 'No payment required.')
+        self.assertContains(response, 'href="/account/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertNotContains(response, 'action="/results/ai-learning-roadmap/?lang=en"')
+        self.assertNotContains(response, '✨ Build My AI Learning Roadmap →')
 
     @patch('analysis.views.prioritise_skill_gaps')
     def test_chinese_learning_roadmap_cta_renders(self, mock_prioritise):
@@ -1656,7 +1695,29 @@ class InterfaceLanguageTests(SimpleTestCase):
         response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
 
         self.assertContains(response, '把优先级变成具体行动')
-        self.assertContains(response, '✨ 生成我的 AI 学习路线 →')
+        self.assertContains(response, '需要账号权限')
+        self.assertContains(response, '你已经找到了最值得优先补齐的技能。创建免费 FitGap 账号，即可解锁个性化 AI 学习路线，保存本次分析，并在之后随时回来继续查看。')
+        self.assertContains(response, '获得个性化 AI 学习路线')
+        self.assertContains(response, '免费注册并生成学习路线 →')
+        self.assertContains(response, '已有账号？登录')
+        self.assertContains(response, '无需付费。')
+        self.assertContains(response, 'href="/account/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertNotContains(response, 'action="/results/ai-learning-roadmap/?lang=zh"')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_following_roadmap_account_gate_does_not_call_roadmap_service(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+
+        self.assertContains(response, 'href="/account/?lang=en&amp;intent=roadmap"', html=False)
+        account_response = self.client.get('/account/?lang=en&intent=roadmap')
+
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(account_response, 'analysis/account_entry.html')
+        self.assertContains(account_response, 'Unlock Your Personalised Learning Roadmap')
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
@@ -1840,8 +1901,9 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertTemplateUsed(response, 'analysis/ai_results.html')
         self.assertContains(response, 'No AI priority skills are available for roadmap generation.')
 
+    @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
-    def test_ai_results_english_to_chinese_language_switch_preserves_priority_data(self, mock_prioritise):
+    def test_ai_results_english_to_chinese_language_switch_preserves_priority_data(self, mock_prioritise, mock_roadmap):
         mock_prioritise.return_value = [
             {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required for backend work.'},
             {'skill': 'REST APIs', 'priority': 'medium', 'reason': 'REST APIs support service responsibilities.'},
@@ -1849,9 +1911,11 @@ class InterfaceLanguageTests(SimpleTestCase):
         results_response = self._results_response('en')
         ai_response = self._post_ai_prioritisation(results_response, 'en')
         mock_prioritise.reset_mock()
+        mock_roadmap.reset_mock()
         switched_response = self._switch_ai_results_language(ai_response, 'zh')
 
         mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
         self.assertTemplateUsed(switched_response, 'analysis/ai_results.html')
         self.assertContains(switched_response, 'AI 推荐的下一步')
         self.assertContains(switched_response, '基于已验证的技能差距和目标职位要求，AI 已为你识别最值得优先处理的技能。')
@@ -1861,6 +1925,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(switched_response, '1 · Django')
         self.assertContains(switched_response, '2 · REST APIs')
         self.assertContains(switched_response, 'Django is explicitly required for backend work.')
+        self.assertContains(switched_response, 'href="/account/?lang=zh&amp;intent=roadmap"', html=False)
         self.assertContains(switched_response, '← 返回完整分析结果')
 
     @patch('analysis.views.prioritise_skill_gaps')
