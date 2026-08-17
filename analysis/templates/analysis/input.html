@@ -38,6 +38,12 @@
 
         <div class="row justify-content-center">
             <div class="col-12 col-lg-10 col-xl-8">
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-info" role="status">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+
                 <section class="text-center mx-auto mb-5" style="max-width: 760px;" aria-labelledby="hero-heading">
                     <strong class="d-inline-block fs-5 fw-bold mb-3 text-dark">{{ text.hero_product_label }}</strong>
                     <h1 id="hero-heading" class="display-5 fw-bold mb-3 fitgap-blue-emphasis" style="color: #1D63ED;">{{ text.hero_headline }}</h1>

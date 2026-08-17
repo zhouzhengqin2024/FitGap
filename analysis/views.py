@@ -1,12 +1,14 @@
+from django.contrib import messages
+from django.contrib.auth import login, logout
 from django.core import signing
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from .ai_learning_roadmap import LearningRoadmapUnavailable, generate_learning_roadmap
 from .ai_prioritisation import AIPrioritisationUnavailable, prioritise_skill_gaps
 from .document_extraction import DocumentExtractionError, extract_document_text
-from .forms import AnalysisInputForm
+from .forms import AccountLoginForm, AccountRegistrationForm, AnalysisInputForm
 from .services import (
     build_skill_evidence_details,
     calculate_match_score,
@@ -164,6 +166,19 @@ def _build_roadmap_status(status, text):
     }
 
 
+def _account_url(language, roadmap_intent=False):
+    url = f'/account/?lang={language}'
+    if roadmap_intent:
+        url += '&intent=roadmap'
+    return url
+
+
+def _post_auth_redirect_url(language, roadmap_intent=False):
+    if roadmap_intent:
+        return f'/analyse/?lang={language}'
+    return _account_url(language)
+
+
 def landing_view(request):
     language = _get_selected_language(request)
     text = get_translations(language)
@@ -182,14 +197,45 @@ def account_entry_view(request):
     language = _get_selected_language(request)
     text = get_translations(language)
     roadmap_intent = request.GET.get('intent') == 'roadmap'
-    account_message = text['account_prototype_message'] if request.method == 'POST' else ''
+    login_form = AccountLoginForm(language=language, request=request, prefix='login')
+    registration_form = AccountRegistrationForm(language=language, prefix='register')
+
+    if request.method == 'POST':
+        action = request.POST.get('account_action')
+
+        if action == 'logout':
+            logout(request)
+            messages.success(request, text['account_signed_out'])
+            return redirect(f'/?lang={language}')
+
+        if action == 'sign_in':
+            login_form = AccountLoginForm(request.POST, language=language, request=request, prefix='login')
+            if login_form.is_valid():
+                login(request, login_form.user)
+                if roadmap_intent:
+                    messages.success(request, text['account_signed_in_roadmap'])
+                else:
+                    messages.success(request, text['account_signed_in'])
+                return redirect(_post_auth_redirect_url(language, roadmap_intent))
+
+        if action == 'create_account':
+            registration_form = AccountRegistrationForm(request.POST, language=language, prefix='register')
+            if registration_form.is_valid():
+                user = registration_form.save()
+                login(request, user)
+                if roadmap_intent:
+                    messages.success(request, text['account_created_roadmap'])
+                else:
+                    messages.success(request, text['account_created'])
+                return redirect(_post_auth_redirect_url(language, roadmap_intent))
 
     return render(
         request,
         'analysis/account_entry.html',
         {
-            'account_message': account_message,
+            'login_form': login_form,
             'language': language,
+            'registration_form': registration_form,
             'roadmap_intent': roadmap_intent,
             'text': text,
         },
@@ -326,6 +372,9 @@ def learning_roadmap_view(request):
 def ai_learning_roadmap_view(request):
     language = _get_selected_language(request)
     text = get_translations(language)
+
+    if not request.user.is_authenticated:
+        return redirect(_account_url(language, roadmap_intent=True))
 
     try:
         results = signing.loads(request.POST.get('analysis_payload', ''), max_age=3600)

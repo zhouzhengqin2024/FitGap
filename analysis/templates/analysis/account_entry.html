@@ -18,13 +18,13 @@
                 {% if language == 'en' %}
                     <strong aria-current="page" class="text-dark">English</strong>
                 {% else %}
-                    <a href="{% url 'analysis:account_entry' %}?lang=en{% if roadmap_intent %}&amp;intent=roadmap{% endif %}">English</a>
+                    <a href="{% url 'analysis:account_entry' %}?lang=en{% if roadmap_intent and not request.user.is_authenticated %}&amp;intent=roadmap{% endif %}">English</a>
                 {% endif %}
                 <span class="text-muted mx-2">|</span>
                 {% if language == 'zh' %}
                     <strong aria-current="page" class="text-dark">简体中文</strong>
                 {% else %}
-                    <a href="{% url 'analysis:account_entry' %}?lang=zh{% if roadmap_intent %}&amp;intent=roadmap{% endif %}">简体中文</a>
+                    <a href="{% url 'analysis:account_entry' %}?lang=zh{% if roadmap_intent and not request.user.is_authenticated %}&amp;intent=roadmap{% endif %}">简体中文</a>
                 {% endif %}
             </nav>
         </header>
@@ -41,65 +41,124 @@
                     </p>
                 </section>
 
-                {% if account_message %}
-                    <div class="alert alert-info" role="status">{{ account_message }}</div>
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-info" role="status">{{ message }}</div>
+                    {% endfor %}
                 {% endif %}
 
-                <div class="row g-4 align-items-start">
-                    <div class="col-12 col-lg-7">
-                        <div class="row g-4">
-                            <div class="col-12 col-md-6">
-                                <section class="h-100 p-4 rounded-3 bg-white border" aria-labelledby="signin-heading">
-                                    <h2 id="signin-heading" class="h4 fw-bold mb-3">{{ text.account_sign_in }}</h2>
-                                    <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}{% if roadmap_intent %}&amp;intent=roadmap{% endif %}">
-                                        {% csrf_token %}
-                                        <div class="mb-3">
-                                            <label for="signin-email" class="form-label">{{ text.account_email }}</label>
-                                            <input id="signin-email" name="email" type="email" class="form-control" autocomplete="email">
-                                        </div>
-                                        <div class="mb-3">
-                                            <label for="signin-password" class="form-label">{{ text.account_password }}</label>
-                                            <input id="signin-password" name="password" type="password" class="form-control" autocomplete="current-password">
-                                        </div>
-                                        <button type="submit" class="btn btn-primary" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.account_sign_in }}</button>
-                                    </form>
-                                </section>
-                            </div>
-                            <div class="col-12 col-md-6">
-                                <section class="h-100 p-4 rounded-3 bg-white border" aria-labelledby="create-heading">
-                                    <p class="small text-muted mb-1">{{ text.account_new_user }}</p>
-                                    <h2 id="create-heading" class="h4 fw-bold mb-3">{{ text.account_create }}</h2>
-                                    <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}{% if roadmap_intent %}&amp;intent=roadmap{% endif %}">
-                                        {% csrf_token %}
-                                        <div class="mb-3">
-                                            <label for="create-email" class="form-label">{{ text.account_email }}</label>
-                                            <input id="create-email" name="email" type="email" class="form-control" autocomplete="email">
-                                        </div>
-                                        <div class="mb-3">
-                                            <label for="create-password" class="form-label">{{ text.account_password }}</label>
-                                            <input id="create-password" name="password" type="password" class="form-control" autocomplete="new-password">
-                                        </div>
-                                        <div class="mb-3">
-                                            <label for="create-confirm-password" class="form-label">{{ text.account_confirm_password }}</label>
-                                            <input id="create-confirm-password" name="confirm_password" type="password" class="form-control" autocomplete="new-password">
-                                        </div>
-                                        <button type="submit" class="btn btn-outline-primary">{{ text.account_create }}</button>
-                                    </form>
-                                </section>
+                {% if request.user.is_authenticated %}
+                    <section class="p-4 p-md-5 rounded-3 bg-white border" aria-labelledby="signed-in-heading">
+                        <h2 id="signed-in-heading" class="h3 fw-bold mb-3">{{ text.account_signed_in_heading }}</h2>
+                        <p class="fs-5 mb-2">{{ request.user.email }}</p>
+                        <p class="text-secondary mb-4">{{ text.account_signed_in_roadmap_access }}</p>
+                        <div class="d-flex flex-column flex-sm-row gap-3 align-items-start">
+                            <a href="{% url 'analysis:input' %}?lang={{ language }}" class="btn btn-primary" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.account_start_new_analysis }}</a>
+                            <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}">
+                                {% csrf_token %}
+                                <input type="hidden" name="account_action" value="logout">
+                                <button type="submit" class="btn btn-outline-secondary">{{ text.account_log_out }}</button>
+                            </form>
+                        </div>
+                    </section>
+                {% else %}
+                    <div class="row g-4 align-items-start">
+                        <div class="col-12 col-lg-7">
+                            <div class="row g-4">
+                                <div class="col-12 col-md-6">
+                                    <section class="h-100 p-4 rounded-3 bg-white border" aria-labelledby="signin-heading">
+                                        <h2 id="signin-heading" class="h4 fw-bold mb-3">{{ text.account_sign_in }}</h2>
+                                        <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}{% if roadmap_intent %}&amp;intent=roadmap{% endif %}" novalidate>
+                                            {% csrf_token %}
+                                            <input type="hidden" name="account_action" value="sign_in">
+                                            {% if login_form.non_field_errors %}
+                                                <div class="alert alert-danger" role="alert">
+                                                    {% for error in login_form.non_field_errors %}
+                                                        <div>{{ error }}</div>
+                                                    {% endfor %}
+                                                </div>
+                                            {% endif %}
+                                            <div class="mb-3">
+                                                <label for="{{ login_form.email.id_for_label }}" class="form-label">{{ login_form.email.label }}</label>
+                                                {{ login_form.email }}
+                                                {% if login_form.email.errors %}
+                                                    <div class="invalid-feedback d-block">
+                                                        {% for error in login_form.email.errors %}<div>{{ error }}</div>{% endfor %}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="{{ login_form.password.id_for_label }}" class="form-label">{{ login_form.password.label }}</label>
+                                                {{ login_form.password }}
+                                                {% if login_form.password.errors %}
+                                                    <div class="invalid-feedback d-block">
+                                                        {% for error in login_form.password.errors %}<div>{{ error }}</div>{% endfor %}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                            <button type="submit" class="btn btn-primary" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.account_sign_in }}</button>
+                                        </form>
+                                    </section>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <section class="h-100 p-4 rounded-3 bg-white border" aria-labelledby="create-heading">
+                                        <p class="small text-muted mb-1">{{ text.account_new_user }}</p>
+                                        <h2 id="create-heading" class="h4 fw-bold mb-3">{{ text.account_create }}</h2>
+                                        <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}{% if roadmap_intent %}&amp;intent=roadmap{% endif %}" novalidate>
+                                            {% csrf_token %}
+                                            <input type="hidden" name="account_action" value="create_account">
+                                            {% if registration_form.non_field_errors %}
+                                                <div class="alert alert-danger" role="alert">
+                                                    {% for error in registration_form.non_field_errors %}
+                                                        <div>{{ error }}</div>
+                                                    {% endfor %}
+                                                </div>
+                                            {% endif %}
+                                            <div class="mb-3">
+                                                <label for="{{ registration_form.email.id_for_label }}" class="form-label">{{ registration_form.email.label }}</label>
+                                                {{ registration_form.email }}
+                                                {% if registration_form.email.errors %}
+                                                    <div class="invalid-feedback d-block">
+                                                        {% for error in registration_form.email.errors %}<div>{{ error }}</div>{% endfor %}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="{{ registration_form.password.id_for_label }}" class="form-label">{{ registration_form.password.label }}</label>
+                                                {{ registration_form.password }}
+                                                {% if registration_form.password.errors %}
+                                                    <div class="invalid-feedback d-block">
+                                                        {% for error in registration_form.password.errors %}<div>{{ error }}</div>{% endfor %}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="{{ registration_form.confirm_password.id_for_label }}" class="form-label">{{ registration_form.confirm_password.label }}</label>
+                                                {{ registration_form.confirm_password }}
+                                                {% if registration_form.confirm_password.errors %}
+                                                    <div class="invalid-feedback d-block">
+                                                        {% for error in registration_form.confirm_password.errors %}<div>{{ error }}</div>{% endfor %}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                            <button type="submit" class="btn btn-outline-primary">{{ text.account_create }}</button>
+                                        </form>
+                                    </section>
+                                </div>
                             </div>
                         </div>
+                        <aside class="col-12 col-lg-5">
+                            <div class="p-4 rounded-3 bg-white border">
+                                <h2 class="h4 fw-bold mb-3">{{ text.account_value_heading }}</h2>
+                                <ul class="mb-0">
+                                    <li>{{ text.account_value_1 }}</li>
+                                    <li>{{ text.account_value_2 }}</li>
+                                    <li>{{ text.account_value_3 }}</li>
+                                </ul>
+                            </div>
+                        </aside>
                     </div>
-                    <aside class="col-12 col-lg-5">
-                        <div class="p-4 rounded-3 bg-white border">
-                            <h2 class="h4 fw-bold mb-3">{{ text.account_value_heading }}</h2>
-                            <ul class="mb-0">
-                                <li>{{ text.account_value_1 }}</li>
-                                <li>{{ text.account_value_2 }}</li>
-                                <li>{{ text.account_value_3 }}</li>
-                            </ul>
-                        </div>
-                    </aside>
-                </div>
+                {% endif %}
 
                 <div class="mt-4">
                     <a href="{% url 'analysis:landing' %}?lang={{ language }}" class="btn btn-link px-0">{{ text.account_back }}</a>

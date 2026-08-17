@@ -54,21 +54,31 @@
                 </section>
 
                 <section class="mb-4 p-4 rounded-3" style="background: #F4F7FF; border: 1px solid #D7E3FF;">
-                    <span class="badge text-bg-light border mb-3">{{ text.roadmap_gate_label }}</span>
                     <h2 class="h3 fw-bold" style="color: #1D63ED;">{{ text.roadmap_cta_heading }}</h2>
-                    <p class="text-muted">{{ text.roadmap_gate_message }}</p>
-                    <ul class="list-unstyled mb-4">
-                        <li class="mb-2">✓ {{ text.roadmap_gate_benefit_1 }}</li>
-                        <li class="mb-2">✓ {{ text.roadmap_gate_benefit_2 }}</li>
-                        <li class="mb-2">✓ {{ text.roadmap_gate_benefit_3 }}</li>
-                        <li class="mb-2">✓ {{ text.roadmap_gate_benefit_4 }}</li>
-                        <li class="mb-0">✓ {{ text.roadmap_gate_benefit_5 }}</li>
-                    </ul>
-                    <div class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-3">
-                        <a href="{% url 'analysis:account_entry' %}?lang={{ language }}&amp;intent=roadmap" class="btn btn-lg text-white" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.roadmap_gate_primary_cta }}</a>
-                        <a href="{% url 'analysis:account_entry' %}?lang={{ language }}&amp;intent=roadmap">{{ text.roadmap_gate_secondary_cta }}</a>
-                    </div>
-                    <p class="small text-muted mt-3 mb-0">{{ text.roadmap_gate_no_payment }}</p>
+                    {% if request.user.is_authenticated %}
+                        <p class="text-muted">{{ text.roadmap_authenticated_message }}</p>
+                        <form method="post" action="{% url 'analysis:ai_learning_roadmap' %}?lang={{ language }}" class="mb-3">
+                            {% csrf_token %}
+                            <input type="hidden" name="output_language" value="{{ language }}">
+                            <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
+                            <button type="submit" class="btn btn-lg text-white" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.roadmap_cta_button }}</button>
+                        </form>
+                    {% else %}
+                        <span class="badge text-bg-light border mb-3">{{ text.roadmap_gate_label }}</span>
+                        <p class="text-muted">{{ text.roadmap_gate_message }}</p>
+                        <ul class="list-unstyled mb-4">
+                            <li class="mb-2">✓ {{ text.roadmap_gate_benefit_1 }}</li>
+                            <li class="mb-2">✓ {{ text.roadmap_gate_benefit_2 }}</li>
+                            <li class="mb-2">✓ {{ text.roadmap_gate_benefit_3 }}</li>
+                            <li class="mb-2">✓ {{ text.roadmap_gate_benefit_4 }}</li>
+                            <li class="mb-0">✓ {{ text.roadmap_gate_benefit_5 }}</li>
+                        </ul>
+                        <div class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-3">
+                            <a href="{% url 'analysis:account_entry' %}?lang={{ language }}&amp;intent=roadmap" class="btn btn-lg text-white" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.roadmap_gate_primary_cta }}</a>
+                            <a href="{% url 'analysis:account_entry' %}?lang={{ language }}&amp;intent=roadmap">{{ text.roadmap_gate_secondary_cta }}</a>
+                        </div>
+                        <p class="small text-muted mt-3 mb-0">{{ text.roadmap_gate_no_payment }}</p>
+                    {% endif %}
 
                     {% if results.learning_roadmap_status %}
                         <div class="alert alert-warning mt-3 mb-0" role="alert">

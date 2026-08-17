@@ -29,6 +29,12 @@
             </nav>
         </header>
 
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-info mx-auto" style="max-width: 960px;" role="status">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+
         <section class="text-center mx-auto mb-5" style="max-width: 820px;" aria-labelledby="landing-heading">
             <strong class="d-inline-block fs-5 fw-bold mb-3 text-dark">{{ text.hero_product_label }}</strong>
             <h1 id="landing-heading" class="display-4 fw-bold mb-3" style="color: #1D63ED;">{{ text.hero_headline }}</h1>

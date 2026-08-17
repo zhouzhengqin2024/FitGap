@@ -1,4 +1,7 @@
 from django import forms
+from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 
 from .translations import get_translations
 
@@ -87,3 +90,109 @@ class AnalysisInputForm(forms.Form):
         ]
         self.fields['output_language'].initial = language
         self.fields['output_language'].error_messages['required'] = text['output_language_required']
+
+
+class AccountRegistrationForm(forms.Form):
+    email = forms.EmailField()
+    password = forms.CharField(widget=forms.PasswordInput)
+    confirm_password = forms.CharField(widget=forms.PasswordInput)
+
+    def __init__(self, *args, language=AnalysisInputForm.LANGUAGE_ENGLISH, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.text = get_translations(language)
+        self.fields['email'].label = self.text['account_email']
+        self.fields['email'].error_messages['required'] = self.text['account_email_required']
+        self.fields['email'].error_messages['invalid'] = self.text['account_invalid_email']
+        self.fields['email'].widget.attrs.update({
+            'class': 'form-control',
+            'autocomplete': 'email',
+        })
+        self.fields['password'].label = self.text['account_password']
+        self.fields['password'].error_messages['required'] = self.text['account_password_required']
+        self.fields['password'].widget.attrs.update({
+            'class': 'form-control',
+            'autocomplete': 'new-password',
+        })
+        self.fields['confirm_password'].label = self.text['account_confirm_password']
+        self.fields['confirm_password'].error_messages['required'] = self.text['account_confirm_password_required']
+        self.fields['confirm_password'].widget.attrs.update({
+            'class': 'form-control',
+            'autocomplete': 'new-password',
+        })
+
+    def clean_email(self):
+        email = self.cleaned_data['email'].strip().lower()
+        User = get_user_model()
+
+        if User.objects.filter(username__iexact=email).exists() or User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError(self.text['account_duplicate_email'])
+
+        return email
+
+    def clean(self):
+        cleaned_data = super().clean()
+        email = cleaned_data.get('email')
+        password = cleaned_data.get('password')
+        confirm_password = cleaned_data.get('confirm_password')
+
+        if password and confirm_password and password != confirm_password:
+            self.add_error('confirm_password', self.text['account_password_mismatch'])
+
+        if email and password:
+            User = get_user_model()
+            user = User(username=email, email=email)
+            try:
+                validate_password(password, user)
+            except ValidationError as exc:
+                self.add_error('password', exc)
+
+        return cleaned_data
+
+    def save(self):
+        User = get_user_model()
+        email = self.cleaned_data['email']
+        return User.objects.create_user(
+            username=email,
+            email=email,
+            password=self.cleaned_data['password'],
+        )
+
+
+class AccountLoginForm(forms.Form):
+    email = forms.EmailField()
+    password = forms.CharField(widget=forms.PasswordInput)
+
+    def __init__(self, *args, language=AnalysisInputForm.LANGUAGE_ENGLISH, request=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.request = request
+        self.user = None
+        self.text = get_translations(language)
+        self.fields['email'].label = self.text['account_email']
+        self.fields['email'].error_messages['required'] = self.text['account_email_required']
+        self.fields['email'].error_messages['invalid'] = self.text['account_invalid_email']
+        self.fields['email'].widget.attrs.update({
+            'class': 'form-control',
+            'autocomplete': 'email',
+        })
+        self.fields['password'].label = self.text['account_password']
+        self.fields['password'].error_messages['required'] = self.text['account_password_required']
+        self.fields['password'].widget.attrs.update({
+            'class': 'form-control',
+            'autocomplete': 'current-password',
+        })
+
+    def clean(self):
+        cleaned_data = super().clean()
+        email = cleaned_data.get('email')
+        password = cleaned_data.get('password')
+
+        if email and password:
+            self.user = authenticate(
+                self.request,
+                username=email.strip().lower(),
+                password=password,
+            )
+            if self.user is None:
+                raise forms.ValidationError(self.text['account_invalid_credentials'])
+
+        return cleaned_data

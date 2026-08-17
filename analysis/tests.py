@@ -4,9 +4,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.staticfiles import finders
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
 from docx import Document
@@ -1155,7 +1156,19 @@ class LearningRoadmapServiceTests(SimpleTestCase):
         self.assertNotIn('+44 7700 900123', logged_output)
 
 
-class InterfaceLanguageTests(SimpleTestCase):
+class InterfaceLanguageTests(TestCase):
+    def _create_user(self, email='student@example.com', password='StrongPass123!'):
+        User = get_user_model()
+        return User.objects.create_user(
+            username=email.lower(),
+            email=email.lower(),
+            password=password,
+        )
+
+    def _login_user(self, email='student@example.com', password='StrongPass123!'):
+        self._create_user(email, password)
+        self.assertTrue(self.client.login(username=email.lower(), password=password))
+
     def _results_response(self, language='en', cv_text='Python SQL Git', job_description_text='Python SQL Django REST APIs JavaScript'):
         return self.client.post(f'/analyse/?lang={language}', data={
             'cv_text': cv_text,
@@ -1299,28 +1312,160 @@ class InterfaceLanguageTests(SimpleTestCase):
         self.assertContains(response, 'href="/account/?lang=en&amp;intent=roadmap"', html=False)
         self.assertContains(response, 'action="/account/?lang=zh&amp;intent=roadmap"', html=False)
 
-    def test_account_post_shows_prototype_message_without_authentication(self):
+    def test_valid_registration_creates_hashed_user_and_logs_in(self):
         response = self.client.post('/account/?lang=en', data={
-            'email': 'student@example.com',
-            'password': 'not-stored',
-            'confirm_password': 'not-stored',
-        })
+            'account_action': 'create_account',
+            'register-email': 'Student@Example.com',
+            'register-password': 'VeryStrongPass123!',
+            'register-confirm_password': 'VeryStrongPass123!',
+        }, follow=True)
+        User = get_user_model()
+        user = User.objects.get()
 
-        self.assertContains(response, 'Account access will be enabled in the next product iteration.')
-        self.assertNotContains(response, 'successfully signed in')
-        self.assertNotContains(response, 'logged in')
-        self.assertNotIn('sessionid', self.client.cookies)
+        self.assertRedirects(response, '/account/?lang=en')
+        self.assertEqual(user.username, 'student@example.com')
+        self.assertEqual(user.email, 'student@example.com')
+        self.assertNotEqual(user.password, 'VeryStrongPass123!')
+        self.assertTrue(user.check_password('VeryStrongPass123!'))
+        self.assertContains(response, 'You&#x27;re signed in to FitGap', html=False)
+        self.assertContains(response, 'student@example.com')
+        self.assertNotContains(response, 'Confirm password')
 
-    def test_roadmap_account_gate_post_preserves_context_without_authentication(self):
+    def test_registration_with_roadmap_intent_redirects_to_new_analysis(self):
         response = self.client.post('/account/?lang=en&intent=roadmap', data={
-            'email': 'student@example.com',
-            'password': 'not-stored',
-            'confirm_password': 'not-stored',
+            'account_action': 'create_account',
+            'register-email': 'student@example.com',
+            'register-password': 'VeryStrongPass123!',
+            'register-confirm_password': 'VeryStrongPass123!',
+        }, follow=True)
+
+        self.assertRedirects(response, '/analyse/?lang=en')
+        self.assertContains(
+            response,
+            'Account created successfully. Start a new analysis to unlock your personalised roadmap.',
+        )
+        self.assertEqual(get_user_model().objects.count(), 1)
+
+    def test_duplicate_email_registration_is_rejected_case_insensitively(self):
+        self._create_user(email='student@example.com')
+        response = self.client.post('/account/?lang=en', data={
+            'account_action': 'create_account',
+            'register-email': 'STUDENT@example.com',
+            'register-password': 'VeryStrongPass123!',
+            'register-confirm_password': 'VeryStrongPass123!',
         })
 
-        self.assertContains(response, 'Unlock Your Personalised Learning Roadmap')
-        self.assertContains(response, 'Account access will be enabled in the next product iteration.')
-        self.assertNotIn('sessionid', self.client.cookies)
+        self.assertContains(response, 'An account already exists for this email address.')
+        self.assertEqual(get_user_model().objects.count(), 1)
+
+    def test_registration_rejects_invalid_email_mismatched_passwords_and_missing_fields(self):
+        invalid_response = self.client.post('/account/?lang=en', data={
+            'account_action': 'create_account',
+            'register-email': 'not-an-email',
+            'register-password': 'VeryStrongPass123!',
+            'register-confirm_password': 'DifferentPass123!',
+        })
+        missing_response = self.client.post('/account/?lang=en', data={
+            'account_action': 'create_account',
+        })
+
+        self.assertContains(invalid_response, 'Please enter a valid email address.')
+        self.assertContains(invalid_response, 'The two passwords do not match.')
+        self.assertContains(missing_response, 'Please enter your email address.')
+        self.assertContains(missing_response, 'Please enter your password.')
+        self.assertContains(missing_response, 'Please confirm your password.')
+        self.assertEqual(get_user_model().objects.count(), 0)
+
+    def test_registration_uses_django_password_validation(self):
+        response = self.client.post('/account/?lang=en', data={
+            'account_action': 'create_account',
+            'register-email': 'student@example.com',
+            'register-password': 'password',
+            'register-confirm_password': 'password',
+        })
+
+        self.assertContains(response, 'This password is too common.')
+        self.assertEqual(get_user_model().objects.count(), 0)
+
+    def test_valid_login_establishes_authenticated_session(self):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        response = self.client.post('/account/?lang=en', data={
+            'account_action': 'sign_in',
+            'login-email': 'STUDENT@example.com',
+            'login-password': 'VeryStrongPass123!',
+        }, follow=True)
+
+        self.assertRedirects(response, '/account/?lang=en')
+        self.assertContains(response, 'You&#x27;re signed in to FitGap', html=False)
+        self.assertContains(response, 'student@example.com')
+        self.assertIn('_auth_user_id', self.client.session)
+
+    def test_login_rejects_invalid_unknown_and_missing_credentials(self):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        wrong_response = self.client.post('/account/?lang=en', data={
+            'account_action': 'sign_in',
+            'login-email': 'student@example.com',
+            'login-password': 'WrongPass123!',
+        })
+        unknown_response = self.client.post('/account/?lang=en', data={
+            'account_action': 'sign_in',
+            'login-email': 'unknown@example.com',
+            'login-password': 'VeryStrongPass123!',
+        })
+        missing_response = self.client.post('/account/?lang=en', data={
+            'account_action': 'sign_in',
+        })
+
+        self.assertContains(wrong_response, 'The email or password is incorrect.')
+        self.assertContains(unknown_response, 'The email or password is incorrect.')
+        self.assertContains(missing_response, 'Please enter your email address.')
+        self.assertContains(missing_response, 'Please enter your password.')
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_login_with_roadmap_intent_redirects_to_new_analysis(self):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        response = self.client.post('/account/?lang=en&intent=roadmap', data={
+            'account_action': 'sign_in',
+            'login-email': 'student@example.com',
+            'login-password': 'VeryStrongPass123!',
+        }, follow=True)
+
+        self.assertRedirects(response, '/analyse/?lang=en')
+        self.assertContains(
+            response,
+            'Signed in successfully. Start a new analysis to unlock your personalised roadmap.',
+        )
+
+    def test_authenticated_account_page_shows_state_and_logout(self):
+        self._login_user()
+        response = self.client.get('/account/?lang=en')
+
+        self.assertContains(response, 'You&#x27;re signed in to FitGap', html=False)
+        self.assertContains(response, 'student@example.com')
+        self.assertContains(response, 'Your account can unlock personalised learning roadmaps.')
+        self.assertContains(response, 'Start New Analysis →')
+        self.assertContains(response, 'Log out')
+        self.assertNotContains(response, 'Confirm password')
+
+    def test_chinese_authenticated_account_page_renders(self):
+        self._login_user(email='student@example.com')
+        response = self.client.get('/account/?lang=zh')
+
+        self.assertContains(response, '你已登录 FitGap')
+        self.assertContains(response, '你的账号可以解锁个性化学习路线。')
+        self.assertContains(response, '开始新的分析 →')
+        self.assertContains(response, '退出登录')
+
+    def test_logout_ends_session_without_deleting_user(self):
+        self._login_user()
+        response = self.client.post('/account/?lang=en', data={
+            'account_action': 'logout',
+        }, follow=True)
+
+        self.assertRedirects(response, '/?lang=en')
+        self.assertContains(response, 'Signed out successfully.')
+        self.assertNotIn('_auth_user_id', self.client.session)
+        self.assertEqual(get_user_model().objects.count(), 1)
 
     def test_english_input_page(self):
         response = self.client.get('/analyse/?lang=en')
@@ -1721,12 +1866,62 @@ class InterfaceLanguageTests(SimpleTestCase):
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
+    def test_unauthenticated_direct_roadmap_post_is_blocked_before_gemini(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        response = self._post_learning_roadmap(ai_response, 'en')
+
+        mock_roadmap.assert_not_called()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], '/account/?lang=en&intent=roadmap')
+        self.assertNotContains(response, 'My AI Learning Roadmap', status_code=302)
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_authenticated_page_three_renders_real_roadmap_cta(self, mock_prioritise):
+        self._login_user()
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+
+        self.assertContains(response, '1 · Django')
+        self.assertContains(response, 'Turn Your Priorities into Action')
+        self.assertContains(
+            response,
+            'You&#x27;ve identified your highest-priority gaps. Turn them into a focused, personalised learning roadmap.',
+            html=False,
+        )
+        self.assertContains(response, '✨ Build My AI Learning Roadmap →')
+        self.assertContains(response, 'action="/results/ai-learning-roadmap/?lang=en"')
+        self.assertNotContains(response, 'ACCOUNT ACCESS REQUIRED')
+        self.assertNotContains(response, 'Create Free Account')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_authenticated_chinese_page_three_renders_real_roadmap_cta(self, mock_prioritise):
+        self._login_user()
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是核心后端框架要求。'},
+        ]
+        response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
+
+        self.assertContains(response, '1 · Django')
+        self.assertContains(response, '把优先级变成具体行动')
+        self.assertContains(response, '你已经找到了最值得优先补齐的技能。现在把它们转化为聚焦、个性化的学习路线。')
+        self.assertContains(response, '✨ 生成我的 AI 学习路线 →')
+        self.assertContains(response, 'action="/results/ai-learning-roadmap/?lang=zh"')
+        self.assertNotContains(response, '需要账号权限')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
     def test_learning_roadmap_endpoint_invokes_service_after_explicit_post(self, mock_prioritise, mock_roadmap):
         mock_prioritise.return_value = [
             {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
         ]
         mock_roadmap.return_value = _sample_roadmap(['Django'])
         ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._login_user()
         response = self._post_learning_roadmap(ai_response, 'en')
 
         mock_roadmap.assert_called_once()
@@ -1741,6 +1936,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         ]
         mock_roadmap.return_value = _sample_roadmap(['Django'])
         ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._login_user()
 
         self._post_learning_roadmap(ai_response, 'en')
 
@@ -1760,6 +1956,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         ]
         mock_roadmap.return_value = _sample_roadmap(['Django', 'REST APIs'])
         ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._login_user()
         response = self._post_learning_roadmap(ai_response, 'en')
 
         self.assertTemplateUsed(response, 'analysis/learning_roadmap.html')
@@ -1804,6 +2001,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         ]
         mock_roadmap.return_value = _sample_roadmap(['Django'])
         ai_response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
+        self._login_user()
         response = self._post_learning_roadmap(ai_response, 'zh')
 
         self.assertContains(response, '我的 AI 学习路线')
@@ -1828,6 +2026,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         ]
         mock_roadmap.return_value = _sample_roadmap(['Django'])
         ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._login_user()
         roadmap_response = self._post_learning_roadmap(ai_response, 'en')
         mock_prioritise.reset_mock()
         mock_roadmap.reset_mock()
@@ -1850,6 +2049,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         ]
         mock_roadmap.return_value = _sample_roadmap(['Django'])
         ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._login_user()
         roadmap_response = self._post_learning_roadmap(ai_response, 'en')
         mock_prioritise.reset_mock()
         mock_roadmap.reset_mock()
@@ -1871,6 +2071,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         ]
         mock_roadmap.side_effect = LearningRoadmapUnavailable
         ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._login_user()
         response = self._post_learning_roadmap(ai_response, 'en')
 
         self.assertTemplateUsed(response, 'analysis/ai_results.html')
@@ -1888,6 +2089,7 @@ class InterfaceLanguageTests(SimpleTestCase):
         ]
         mock_roadmap.side_effect = LearningRoadmapUnavailable
         ai_response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
+        self._login_user()
         response = self._post_learning_roadmap(ai_response, 'zh')
 
         self.assertContains(response, 'AI 学习路线暂时不可用。你仍可查看上方已经生成的技能优先级，并可以稍后再次尝试生成学习路线。')
@@ -1895,6 +2097,7 @@ class InterfaceLanguageTests(SimpleTestCase):
     @patch('analysis.views.generate_learning_roadmap')
     def test_roadmap_endpoint_skips_service_when_no_priorities_exist(self, mock_roadmap):
         results_response = self._results_response('en')
+        self._login_user()
         response = self._post_learning_roadmap(results_response, 'en')
 
         mock_roadmap.assert_not_called()
