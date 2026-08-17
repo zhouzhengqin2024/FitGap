@@ -34,6 +34,12 @@
 
         <div class="row justify-content-center">
             <div class="col-12 col-lg-10 col-xl-8">
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-info" role="status">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+
                 <section class="mb-5 text-center mx-auto" style="max-width: 760px;" aria-labelledby="ai-results-heading">
                     <h1 id="ai-results-heading" class="display-5 fw-bold mb-3" style="color: #1D63ED;">{{ text.ai_recommended_next_steps }}</h1>
                     <p class="lead text-secondary mb-0">{{ text.ai_results_intro }}</p>
@@ -77,8 +83,20 @@
                             <li class="mb-0">✓ {{ text.roadmap_gate_benefit_5 }}</li>
                         </ul>
                         <div class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-3">
-                            <a href="{% url 'analysis:account_register' %}?lang={{ language }}&amp;intent=roadmap" class="btn btn-lg text-white" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.roadmap_gate_primary_cta }}</a>
-                            <a href="{% url 'analysis:account_login' %}?lang={{ language }}&amp;intent=roadmap">{{ text.roadmap_gate_secondary_cta }}</a>
+                            <form method="post" action="{% url 'analysis:roadmap_auth_start' %}?lang={{ language }}">
+                                {% csrf_token %}
+                                <input type="hidden" name="output_language" value="{{ language }}">
+                                <input type="hidden" name="target" value="register">
+                                <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
+                                <button type="submit" class="btn btn-lg text-white" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.roadmap_gate_primary_cta }}</button>
+                            </form>
+                            <form method="post" action="{% url 'analysis:roadmap_auth_start' %}?lang={{ language }}">
+                                {% csrf_token %}
+                                <input type="hidden" name="output_language" value="{{ language }}">
+                                <input type="hidden" name="target" value="login">
+                                <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
+                                <button type="submit" class="btn btn-link p-0">{{ text.roadmap_gate_secondary_cta }}</button>
+                            </form>
                         </div>
                         <p class="small text-muted mt-3 mb-0">{{ text.roadmap_gate_no_payment }}</p>
                     {% endif %}

@@ -18,6 +18,8 @@ from .services import (
 )
 from .translations import get_translations, normalise_language
 
+PENDING_ROADMAP_CONTINUITY_KEY = 'pending_roadmap_continuity'
+
 
 def _get_selected_language(request):
     posted_language = request.POST.get('output_language')
@@ -191,6 +193,47 @@ def _post_auth_redirect_url(language, roadmap_intent=False):
     return _account_url(language)
 
 
+def _clear_pending_roadmap_continuity(request):
+    request.session.pop(PENDING_ROADMAP_CONTINUITY_KEY, None)
+
+
+def _valid_roadmap_continuity_results(payload):
+    try:
+        results = signing.loads(payload, max_age=3600)
+    except signing.BadSignature:
+        return None
+
+    if results.get('ai_prioritisation', {}).get('status') != 'success':
+        return None
+
+    return results
+
+
+def _restore_pending_roadmap_continuity(request, language, text):
+    state = request.session.get(PENDING_ROADMAP_CONTINUITY_KEY)
+
+    if not isinstance(state, dict):
+        _clear_pending_roadmap_continuity(request)
+        messages.warning(request, text['account_continuity_restore_failed'])
+        return redirect(f'/analyse/?lang={language}')
+
+    payload = state.get('analysis_payload')
+    if not isinstance(payload, str):
+        _clear_pending_roadmap_continuity(request)
+        messages.warning(request, text['account_continuity_restore_failed'])
+        return redirect(f'/analyse/?lang={language}')
+
+    results = _valid_roadmap_continuity_results(payload)
+    if results is None:
+        _clear_pending_roadmap_continuity(request)
+        messages.warning(request, text['account_continuity_restore_failed'])
+        return redirect(f'/analyse/?lang={language}')
+
+    _clear_pending_roadmap_continuity(request)
+    messages.success(request, text['account_continue_roadmap'])
+    return _render_ai_results(request, language, results, text)
+
+
 def landing_view(request):
     language = _get_selected_language(request)
     text = get_translations(language)
@@ -211,6 +254,7 @@ def account_entry_view(request):
     roadmap_intent = request.GET.get('intent') == 'roadmap'
 
     if request.method == 'POST' and request.POST.get('account_action') == 'logout':
+        _clear_pending_roadmap_continuity(request)
         logout(request)
         messages.success(request, text['account_signed_out'])
         return redirect(f'/?lang={language}')
@@ -243,7 +287,7 @@ def account_login_view(request):
         if login_form.is_valid():
             login(request, login_form.user)
             if roadmap_intent:
-                messages.success(request, text['account_signed_in_roadmap'])
+                return _restore_pending_roadmap_continuity(request, language, text)
             else:
                 messages.success(request, text['account_signed_in'])
             return redirect(_post_auth_redirect_url(language, roadmap_intent))
@@ -276,7 +320,7 @@ def account_register_view(request):
             user = registration_form.save()
             login(request, user)
             if roadmap_intent:
-                messages.success(request, text['account_created_roadmap'])
+                return _restore_pending_roadmap_continuity(request, language, text)
             else:
                 messages.success(request, text['account_created'])
             return redirect(_post_auth_redirect_url(language, roadmap_intent))
@@ -292,6 +336,24 @@ def account_register_view(request):
             'text': text,
         },
     )
+
+
+@require_POST
+def roadmap_auth_start_view(request):
+    language = _get_selected_language(request)
+    target = request.POST.get('target')
+    payload = request.POST.get('analysis_payload', '')
+
+    if _valid_roadmap_continuity_results(payload) is not None:
+        request.session[PENDING_ROADMAP_CONTINUITY_KEY] = {
+            'analysis_payload': payload,
+            'language': language,
+        }
+
+    if target == 'register':
+        return redirect(_account_register_url(language, roadmap_intent=True))
+
+    return redirect(_account_login_url(language, roadmap_intent=True))
 
 
 @require_POST
@@ -324,6 +386,9 @@ def input_view(request):
     language = _get_selected_language(request)
     text = get_translations(language)
     form = AnalysisInputForm(request.POST or None, language=language)
+
+    if request.method == 'GET':
+        _clear_pending_roadmap_continuity(request)
 
     if request.method == 'POST' and form.is_valid():
         cv_text = form.cleaned_data['cv_text']

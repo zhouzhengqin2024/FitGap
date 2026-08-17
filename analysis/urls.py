@@ -10,6 +10,7 @@ urlpatterns = [
     path('account/', views.account_entry_view, name='account_entry'),
     path('account/login/', views.account_login_view, name='account_login'),
     path('account/register/', views.account_register_view, name='account_register'),
+    path('account/roadmap-continuity/', views.roadmap_auth_start_view, name='roadmap_auth_start'),
     path('extract-document-text/', views.extract_document_text_view, name='extract_document_text'),
     path('results/ai-prioritise/', views.ai_prioritise_view, name='ai_prioritise'),
     path('results/ai-results/', views.ai_results_view, name='ai_results'),

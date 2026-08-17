@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.staticfiles import finders
+from django.test import Client
 from django.test import SimpleTestCase, TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
@@ -1200,6 +1201,13 @@ class InterfaceLanguageTests(TestCase):
             'output_language': language,
         })
 
+    def _post_roadmap_auth_start(self, response, language='en', target='register'):
+        return self.client.post(f'/account/roadmap-continuity/?lang={language}', data={
+            'analysis_payload': response.context['analysis_payload'],
+            'output_language': language,
+            'target': target,
+        })
+
     def _switch_learning_roadmap_language(self, response, language):
         return self.client.post(f'/results/learning-roadmap/?lang={language}', data={
             'analysis_payload': response.context['analysis_payload'],
@@ -1491,7 +1499,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertRedirects(response, '/analyse/?lang=en')
         self.assertContains(
             response,
-            'Account created successfully. Start a new analysis to unlock your personalised roadmap.',
+            'Your previous analysis could not be restored. Please start a new analysis.',
         )
         self.assertEqual(get_user_model().objects.count(), 1)
 
@@ -1575,7 +1583,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertRedirects(response, '/analyse/?lang=en')
         self.assertContains(
             response,
-            'Signed in successfully. Start a new analysis to unlock your personalised roadmap.',
+            'Your previous analysis could not be restored. Please start a new analysis.',
         )
 
     def test_authenticated_account_page_shows_state_and_logout(self):
@@ -1983,8 +1991,10 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'Create Free Account &amp; Build My Roadmap →', html=False)
         self.assertContains(response, 'Already have an account? Sign in')
         self.assertContains(response, 'No payment required.')
-        self.assertContains(response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
-        self.assertContains(response, 'href="/account/login/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'action="/account/roadmap-continuity/?lang=en"')
+        self.assertContains(response, 'name="target" value="register"')
+        self.assertContains(response, 'name="target" value="login"')
+        self.assertContains(response, 'name="analysis_payload"')
         self.assertNotContains(response, 'action="/results/ai-learning-roadmap/?lang=en"')
         self.assertNotContains(response, '✨ Build My AI Learning Roadmap →')
 
@@ -2002,8 +2012,9 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, '免费注册并生成学习路线 →')
         self.assertContains(response, '已有账号？登录')
         self.assertContains(response, '无需付费。')
-        self.assertContains(response, 'href="/account/register/?lang=zh&amp;intent=roadmap"', html=False)
-        self.assertContains(response, 'href="/account/login/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'action="/account/roadmap-continuity/?lang=zh"')
+        self.assertContains(response, 'name="target" value="register"')
+        self.assertContains(response, 'name="target" value="login"')
         self.assertNotContains(response, 'action="/results/ai-learning-roadmap/?lang=zh"')
 
     @patch('analysis.views.generate_learning_roadmap')
@@ -2014,12 +2025,166 @@ class InterfaceLanguageTests(TestCase):
         ]
         response = self._post_ai_prioritisation(self._results_response('en'), 'en')
 
-        self.assertContains(response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
-        account_response = self.client.get('/account/register/?lang=en&intent=roadmap')
+        self.assertContains(response, 'action="/account/roadmap-continuity/?lang=en"')
+        account_response = self._post_roadmap_auth_start(response, 'en', 'register')
 
         mock_roadmap.assert_not_called()
-        self.assertTemplateUsed(account_response, 'analysis/account_register.html')
-        self.assertContains(account_response, 'Unlock Your Personalised Learning Roadmap')
+        self.assertEqual(account_response.status_code, 302)
+        self.assertEqual(account_response['Location'], '/account/register/?lang=en&intent=roadmap')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_roadmap_account_action_stores_temporary_continuity_state(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        response = self._post_roadmap_auth_start(ai_response, 'en', 'register')
+        continuity = self.client.session.get('pending_roadmap_continuity')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], '/account/register/?lang=en&intent=roadmap')
+        self.assertIsInstance(continuity, dict)
+        self.assertEqual(continuity['language'], 'en')
+        self.assertEqual(continuity['analysis_payload'], ai_response.context['analysis_payload'])
+        self.assertNotIn('cv_text', response['Location'])
+        self.assertNotIn('job_description_text', response['Location'])
+        self.assertNotIn('Python SQL Git', response['Location'])
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_continuity_state_is_session_scoped(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._post_roadmap_auth_start(ai_response, 'en', 'register')
+        other_client = Client()
+
+        self.assertIn('pending_roadmap_continuity', self.client.session)
+        self.assertNotIn('pending_roadmap_continuity', other_client.session)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_login_with_roadmap_intent_restores_authenticated_page_three_without_gemini(self, mock_prioritise, mock_roadmap):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django original priority.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._post_roadmap_auth_start(ai_response, 'en', 'login')
+        mock_prioritise.reset_mock()
+        mock_roadmap.reset_mock()
+        response = self.client.post('/account/login/?lang=en&intent=roadmap', data={
+            'login-email': 'student@example.com',
+            'login-password': 'VeryStrongPass123!',
+        })
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, 'Django original priority.')
+        self.assertContains(response, '✨ Build My AI Learning Roadmap →')
+        self.assertNotContains(response, 'ACCOUNT ACCESS REQUIRED')
+        self.assertContains(response, 'Signed in successfully. Continue with your learning roadmap.')
+        self.assertNotIn('pending_roadmap_continuity', self.client.session)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_registration_with_roadmap_intent_restores_authenticated_page_three_without_gemini(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'REST APIs', 'priority': 'medium', 'reason': 'REST APIs original priority.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._post_roadmap_auth_start(ai_response, 'en', 'register')
+        mock_prioritise.reset_mock()
+        mock_roadmap.reset_mock()
+        response = self.client.post('/account/register/?lang=en&intent=roadmap', data={
+            'register-email': 'newstudent@example.com',
+            'register-password': 'VeryStrongPass123!',
+            'register-confirm_password': 'VeryStrongPass123!',
+        })
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, 'REST APIs original priority.')
+        self.assertContains(response, '✨ Build My AI Learning Roadmap →')
+        self.assertNotContains(response, 'ACCOUNT ACCESS REQUIRED')
+        self.assertEqual(get_user_model().objects.count(), 1)
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_chinese_continuity_preserves_chinese_page_three(self, mock_prioritise):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是原来的优先级。'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
+        self._post_roadmap_auth_start(ai_response, 'zh', 'login')
+        mock_prioritise.reset_mock()
+        response = self.client.post('/account/login/?lang=zh&intent=roadmap', data={
+            'login-email': 'student@example.com',
+            'login-password': 'VeryStrongPass123!',
+        })
+
+        mock_prioritise.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, 'AI 推荐的下一步')
+        self.assertContains(response, 'Django 是原来的优先级。')
+        self.assertContains(response, '✨ 生成我的 AI 学习路线 →')
+        self.assertContains(response, '登录成功。继续生成你的学习路线。')
+
+    def test_missing_continuity_safely_falls_back_to_new_analysis(self):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        response = self.client.post('/account/login/?lang=en&intent=roadmap', data={
+            'login-email': 'student@example.com',
+            'login-password': 'VeryStrongPass123!',
+        }, follow=True)
+
+        self.assertRedirects(response, '/analyse/?lang=en')
+        self.assertContains(response, 'Your previous analysis could not be restored. Please start a new analysis.')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_malformed_continuity_safely_falls_back_without_gemini(self, mock_prioritise, mock_roadmap):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        session = self.client.session
+        session['pending_roadmap_continuity'] = {'analysis_payload': 'not-a-valid-signed-payload', 'language': 'en'}
+        session.save()
+        response = self.client.post('/account/login/?lang=en&intent=roadmap', data={
+            'login-email': 'student@example.com',
+            'login-password': 'VeryStrongPass123!',
+        }, follow=True)
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertRedirects(response, '/analyse/?lang=en')
+        self.assertContains(response, 'Your previous analysis could not be restored. Please start a new analysis.')
+        self.assertNotIn('pending_roadmap_continuity', self.client.session)
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_start_new_analysis_clears_pending_continuity(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._post_roadmap_auth_start(ai_response, 'en', 'register')
+
+        self.assertIn('pending_roadmap_continuity', self.client.session)
+        self.client.get('/analyse/?lang=en')
+        self.assertNotIn('pending_roadmap_continuity', self.client.session)
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_logout_clears_pending_continuity(self, mock_prioritise):
+        self._login_user()
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        self.client.logout()
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._post_roadmap_auth_start(ai_response, 'en', 'register')
+        self._login_user(email='other@example.com')
+
+        self.client.post('/account/?lang=en', data={'account_action': 'logout'})
+        self.assertNotIn('pending_roadmap_continuity', self.client.session)
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
@@ -2286,8 +2451,9 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(switched_response, '1 · Django')
         self.assertContains(switched_response, '2 · REST APIs')
         self.assertContains(switched_response, 'Django is explicitly required for backend work.')
-        self.assertContains(switched_response, 'href="/account/register/?lang=zh&amp;intent=roadmap"', html=False)
-        self.assertContains(switched_response, 'href="/account/login/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(switched_response, 'action="/account/roadmap-continuity/?lang=zh"')
+        self.assertContains(switched_response, 'name="target" value="register"')
+        self.assertContains(switched_response, 'name="target" value="login"')
         self.assertContains(switched_response, '← 返回完整分析结果')
 
     @patch('analysis.views.prioritise_skill_gaps')
