@@ -173,6 +173,18 @@ def _account_url(language, roadmap_intent=False):
     return url
 
 
+def _intent_query(roadmap_intent=False):
+    return '&intent=roadmap' if roadmap_intent else ''
+
+
+def _account_login_url(language, roadmap_intent=False):
+    return f'/account/login/?lang={language}{_intent_query(roadmap_intent)}'
+
+
+def _account_register_url(language, roadmap_intent=False):
+    return f'/account/register/?lang={language}{_intent_query(roadmap_intent)}'
+
+
 def _post_auth_redirect_url(language, roadmap_intent=False):
     if roadmap_intent:
         return f'/analyse/?lang={language}'
@@ -197,44 +209,84 @@ def account_entry_view(request):
     language = _get_selected_language(request)
     text = get_translations(language)
     roadmap_intent = request.GET.get('intent') == 'roadmap'
-    login_form = AccountLoginForm(language=language, request=request, prefix='login')
-    registration_form = AccountRegistrationForm(language=language, prefix='register')
 
-    if request.method == 'POST':
-        action = request.POST.get('account_action')
+    if request.method == 'POST' and request.POST.get('account_action') == 'logout':
+        logout(request)
+        messages.success(request, text['account_signed_out'])
+        return redirect(f'/?lang={language}')
 
-        if action == 'logout':
-            logout(request)
-            messages.success(request, text['account_signed_out'])
-            return redirect(f'/?lang={language}')
-
-        if action == 'sign_in':
-            login_form = AccountLoginForm(request.POST, language=language, request=request, prefix='login')
-            if login_form.is_valid():
-                login(request, login_form.user)
-                if roadmap_intent:
-                    messages.success(request, text['account_signed_in_roadmap'])
-                else:
-                    messages.success(request, text['account_signed_in'])
-                return redirect(_post_auth_redirect_url(language, roadmap_intent))
-
-        if action == 'create_account':
-            registration_form = AccountRegistrationForm(request.POST, language=language, prefix='register')
-            if registration_form.is_valid():
-                user = registration_form.save()
-                login(request, user)
-                if roadmap_intent:
-                    messages.success(request, text['account_created_roadmap'])
-                else:
-                    messages.success(request, text['account_created'])
-                return redirect(_post_auth_redirect_url(language, roadmap_intent))
+    if not request.user.is_authenticated:
+        return redirect(_account_login_url(language, roadmap_intent))
 
     return render(
         request,
         'analysis/account_entry.html',
         {
-            'login_form': login_form,
             'language': language,
+            'roadmap_intent': roadmap_intent,
+            'text': text,
+        },
+    )
+
+
+def account_login_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+    roadmap_intent = request.GET.get('intent') == 'roadmap'
+    login_form = AccountLoginForm(language=language, request=request, prefix='login')
+
+    if request.user.is_authenticated:
+        return redirect(_account_url(language))
+
+    if request.method == 'POST':
+        login_form = AccountLoginForm(request.POST, language=language, request=request, prefix='login')
+        if login_form.is_valid():
+            login(request, login_form.user)
+            if roadmap_intent:
+                messages.success(request, text['account_signed_in_roadmap'])
+            else:
+                messages.success(request, text['account_signed_in'])
+            return redirect(_post_auth_redirect_url(language, roadmap_intent))
+
+    return render(
+        request,
+        'analysis/account_login.html',
+        {
+            'language': language,
+            'login_form': login_form,
+            'register_url': _account_register_url(language, roadmap_intent),
+            'roadmap_intent': roadmap_intent,
+            'text': text,
+        },
+    )
+
+
+def account_register_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+    roadmap_intent = request.GET.get('intent') == 'roadmap'
+    registration_form = AccountRegistrationForm(language=language, prefix='register')
+
+    if request.user.is_authenticated:
+        return redirect(_account_url(language))
+
+    if request.method == 'POST':
+        registration_form = AccountRegistrationForm(request.POST, language=language, prefix='register')
+        if registration_form.is_valid():
+            user = registration_form.save()
+            login(request, user)
+            if roadmap_intent:
+                messages.success(request, text['account_created_roadmap'])
+            else:
+                messages.success(request, text['account_created'])
+            return redirect(_post_auth_redirect_url(language, roadmap_intent))
+
+    return render(
+        request,
+        'analysis/account_register.html',
+        {
+            'language': language,
+            'login_url': _account_login_url(language, roadmap_intent),
             'registration_form': registration_form,
             'roadmap_intent': roadmap_intent,
             'text': text,

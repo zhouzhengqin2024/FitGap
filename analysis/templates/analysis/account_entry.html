@@ -10,9 +10,12 @@
 <body class="bg-light">
     <main class="container py-4 py-md-5">
         <header class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center justify-content-between gap-3 mb-5 mx-auto" style="max-width: 1120px;">
-            <a class="d-inline-flex align-items-center" href="{% url 'analysis:landing' %}?lang={{ language }}" aria-label="FitGap">
-                <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
-            </a>
+            <div class="d-inline-flex align-items-center gap-3">
+                {% include 'analysis/partials/account_drawer.html' %}
+                <a class="d-inline-flex align-items-center" href="{% url 'analysis:landing' %}?lang={{ language }}" aria-label="FitGap">
+                    <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
+                </a>
+            </div>
             <nav class="small" aria-label="Language selection">
                 <span class="text-muted me-2">{{ text.language_switch_label }}</span>
                 {% if language == 'en' %}
@@ -61,103 +64,6 @@
                             </form>
                         </div>
                     </section>
-                {% else %}
-                    <div class="row g-4 align-items-start">
-                        <div class="col-12 col-lg-7">
-                            <div class="row g-4">
-                                <div class="col-12 col-md-6">
-                                    <section class="h-100 p-4 rounded-3 bg-white border" aria-labelledby="signin-heading">
-                                        <h2 id="signin-heading" class="h4 fw-bold mb-3">{{ text.account_sign_in }}</h2>
-                                        <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}{% if roadmap_intent %}&amp;intent=roadmap{% endif %}" novalidate>
-                                            {% csrf_token %}
-                                            <input type="hidden" name="account_action" value="sign_in">
-                                            {% if login_form.non_field_errors %}
-                                                <div class="alert alert-danger" role="alert">
-                                                    {% for error in login_form.non_field_errors %}
-                                                        <div>{{ error }}</div>
-                                                    {% endfor %}
-                                                </div>
-                                            {% endif %}
-                                            <div class="mb-3">
-                                                <label for="{{ login_form.email.id_for_label }}" class="form-label">{{ login_form.email.label }}</label>
-                                                {{ login_form.email }}
-                                                {% if login_form.email.errors %}
-                                                    <div class="invalid-feedback d-block">
-                                                        {% for error in login_form.email.errors %}<div>{{ error }}</div>{% endfor %}
-                                                    </div>
-                                                {% endif %}
-                                            </div>
-                                            <div class="mb-3">
-                                                <label for="{{ login_form.password.id_for_label }}" class="form-label">{{ login_form.password.label }}</label>
-                                                {{ login_form.password }}
-                                                {% if login_form.password.errors %}
-                                                    <div class="invalid-feedback d-block">
-                                                        {% for error in login_form.password.errors %}<div>{{ error }}</div>{% endfor %}
-                                                    </div>
-                                                {% endif %}
-                                            </div>
-                                            <button type="submit" class="btn btn-primary" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.account_sign_in }}</button>
-                                        </form>
-                                    </section>
-                                </div>
-                                <div class="col-12 col-md-6">
-                                    <section class="h-100 p-4 rounded-3 bg-white border" aria-labelledby="create-heading">
-                                        <p class="small text-muted mb-1">{{ text.account_new_user }}</p>
-                                        <h2 id="create-heading" class="h4 fw-bold mb-3">{{ text.account_create }}</h2>
-                                        <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}{% if roadmap_intent %}&amp;intent=roadmap{% endif %}" novalidate>
-                                            {% csrf_token %}
-                                            <input type="hidden" name="account_action" value="create_account">
-                                            {% if registration_form.non_field_errors %}
-                                                <div class="alert alert-danger" role="alert">
-                                                    {% for error in registration_form.non_field_errors %}
-                                                        <div>{{ error }}</div>
-                                                    {% endfor %}
-                                                </div>
-                                            {% endif %}
-                                            <div class="mb-3">
-                                                <label for="{{ registration_form.email.id_for_label }}" class="form-label">{{ registration_form.email.label }}</label>
-                                                {{ registration_form.email }}
-                                                {% if registration_form.email.errors %}
-                                                    <div class="invalid-feedback d-block">
-                                                        {% for error in registration_form.email.errors %}<div>{{ error }}</div>{% endfor %}
-                                                    </div>
-                                                {% endif %}
-                                            </div>
-                                            <div class="mb-3">
-                                                <label for="{{ registration_form.password.id_for_label }}" class="form-label">{{ registration_form.password.label }}</label>
-                                                {{ registration_form.password }}
-                                                {% if registration_form.password.errors %}
-                                                    <div class="invalid-feedback d-block">
-                                                        {% for error in registration_form.password.errors %}<div>{{ error }}</div>{% endfor %}
-                                                    </div>
-                                                {% endif %}
-                                            </div>
-                                            <div class="mb-3">
-                                                <label for="{{ registration_form.confirm_password.id_for_label }}" class="form-label">{{ registration_form.confirm_password.label }}</label>
-                                                {{ registration_form.confirm_password }}
-                                                {% if registration_form.confirm_password.errors %}
-                                                    <div class="invalid-feedback d-block">
-                                                        {% for error in registration_form.confirm_password.errors %}<div>{{ error }}</div>{% endfor %}
-                                                    </div>
-                                                {% endif %}
-                                            </div>
-                                            <button type="submit" class="btn btn-outline-primary">{{ text.account_create }}</button>
-                                        </form>
-                                    </section>
-                                </div>
-                            </div>
-                        </div>
-                        <aside class="col-12 col-lg-5">
-                            <div class="p-4 rounded-3 bg-white border">
-                                <h2 class="h4 fw-bold mb-3">{{ text.account_value_heading }}</h2>
-                                <ul class="mb-0">
-                                    <li>{{ text.account_value_1 }}</li>
-                                    <li>{{ text.account_value_2 }}</li>
-                                    <li>{{ text.account_value_3 }}</li>
-                                </ul>
-                            </div>
-                        </aside>
-                    </div>
                 {% endif %}
 
                 <div class="mt-4">

@@ -1206,6 +1206,29 @@ class InterfaceLanguageTests(TestCase):
             'output_language': language,
         })
 
+    def _assert_account_menu_trigger(self, response):
+        self.assertContains(response, 'data-account-drawer-trigger')
+        self.assertContains(response, 'aria-controls="fitgap-account-drawer"')
+        self.assertContains(response, 'aria-expanded="false"')
+
+    def _assert_guest_drawer(self, response):
+        self._assert_account_menu_trigger(response)
+        self.assertContains(response, 'Browsing as Guest')
+        self.assertContains(response, "You can explore FitGap&#x27;s skill-gap analysis without an account.", html=False)
+        self.assertContains(response, 'Sign In')
+        self.assertContains(response, 'Create Account')
+        self.assertContains(response, 'href="/account/login/?lang=en"')
+        self.assertContains(response, 'href="/account/register/?lang=en"')
+
+    def _assert_authenticated_drawer(self, response, email='student@example.com'):
+        self._assert_account_menu_trigger(response)
+        self.assertContains(response, 'Signed in')
+        self.assertContains(response, email)
+        self.assertContains(response, 'Start New Analysis')
+        self.assertContains(response, 'My FitGap')
+        self.assertContains(response, 'Log out')
+        self.assertContains(response, 'name="account_action" value="logout"')
+
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
     def test_english_landing_page_renders_entry_experience(self, mock_prioritise, mock_roadmap):
@@ -1221,7 +1244,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'No account required. Analyse your CV and target role first.')
         self.assertContains(response, 'href="/analyse/?lang=en"')
         self.assertContains(response, 'Sign In / Create Account')
-        self.assertContains(response, 'href="/account/?lang=en"')
+        self.assertContains(response, 'href="/account/login/?lang=en"')
         self.assertContains(response, 'Identify the Gap')
         self.assertContains(response, 'Prioritise What Matters')
         self.assertContains(response, 'Build a Clear Path')
@@ -1240,11 +1263,69 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, '无需注册，先体验完整的技能差距分析流程。')
         self.assertContains(response, 'href="/analyse/?lang=zh"')
         self.assertContains(response, '登录 / 注册')
-        self.assertContains(response, 'href="/account/?lang=zh"')
+        self.assertContains(response, 'href="/account/login/?lang=zh"')
         self.assertContains(response, '识别差距')
         self.assertContains(response, '明确优先级')
         self.assertContains(response, '形成行动路径')
         self.assertContains(response, 'href="/?lang=en"')
+
+    def test_guest_landing_page_renders_account_drawer(self):
+        response = self.client.get('/?lang=en')
+
+        self._assert_guest_drawer(response)
+        self.assertContains(response, '☰')
+        self.assertContains(response, 'Menu')
+        self.assertContains(response, 'Open account menu')
+        self.assertContains(response, 'Close account menu')
+        self.assertContains(response, 'fitgap-account-drawer')
+
+    def test_authenticated_landing_page_renders_account_drawer(self):
+        self._login_user()
+        response = self.client.get('/?lang=en')
+
+        self._assert_authenticated_drawer(response)
+        self.assertNotContains(response, 'Browsing as Guest')
+        self.assertContains(response, 'You&#x27;re signed in', html=False)
+        self.assertContains(response, 'Your FitGap account is ready. Start a new analysis or manage your account.')
+        self.assertContains(response, 'Start New Analysis →')
+        self.assertContains(response, 'My FitGap')
+        self.assertNotContains(response, 'Sign In / Create Account')
+
+    def test_chinese_guest_landing_page_renders_account_drawer(self):
+        response = self.client.get('/?lang=zh')
+
+        self._assert_account_menu_trigger(response)
+        self.assertContains(response, '菜单')
+        self.assertContains(response, '打开账号菜单')
+        self.assertContains(response, '关闭账号菜单')
+        self.assertContains(response, '游客模式')
+        self.assertContains(response, '无需账号即可体验 FitGap 的技能差距分析。')
+        self.assertContains(response, '登录')
+        self.assertContains(response, '注册账号')
+        self.assertContains(response, 'href="/account/login/?lang=zh"')
+        self.assertContains(response, 'href="/account/register/?lang=zh"')
+
+    def test_chinese_authenticated_landing_page_renders_account_drawer(self):
+        self._login_user()
+        response = self.client.get('/?lang=zh')
+
+        self._assert_account_menu_trigger(response)
+        self.assertContains(response, '已登录')
+        self.assertContains(response, 'student@example.com')
+        self.assertContains(response, '开始新的分析')
+        self.assertContains(response, '我的 FitGap')
+        self.assertContains(response, '退出登录')
+        self.assertContains(response, '你的账号已可使用。开始新的分析，或进入我的 FitGap。')
+        self.assertNotContains(response, '登录 / 注册')
+
+    def test_language_switch_preserves_authenticated_drawer_state(self):
+        self._login_user()
+        response = self.client.get('/?lang=zh')
+
+        self.assertContains(response, '菜单')
+        self.assertContains(response, '已登录')
+        self.assertContains(response, 'student@example.com')
+        self.assertIn('_auth_user_id', self.client.session)
 
     def test_landing_language_switch_stays_on_landing_page(self):
         response = self.client.get('/?lang=en')
@@ -1254,67 +1335,136 @@ class InterfaceLanguageTests(TestCase):
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
-    def test_english_account_entry_page_renders_without_ai_calls(self, mock_prioritise, mock_roadmap):
+    def test_guest_account_entry_redirects_to_login_without_ai_calls(self, mock_prioritise, mock_roadmap):
         response = self.client.get('/account/?lang=en')
 
         mock_prioritise.assert_not_called()
         mock_roadmap.assert_not_called()
-        self.assertTemplateUsed(response, 'analysis/account_entry.html')
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], '/account/login/?lang=en')
+
+    def test_english_login_page_renders_login_form_only(self):
+        response = self.client.get('/account/login/?lang=en')
+
+        self.assertTemplateUsed(response, 'analysis/account_login.html')
         self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
-        self.assertContains(response, 'Welcome to FitGap')
+        self.assertContains(response, 'Welcome back')
         self.assertContains(response, 'Sign In')
-        self.assertContains(response, 'Create Account')
         self.assertContains(response, 'New to FitGap?')
+        self.assertContains(response, 'Create an account →')
+        self.assertContains(response, 'Email')
+        self.assertContains(response, 'Password')
+        self.assertNotContains(response, 'Confirm password')
+        self.assertNotContains(response, 'Create your FitGap account')
+        self.assertContains(response, 'Keep Your Progress with FitGap')
+        self.assertContains(response, 'Your career progress shouldn&#x27;t disappear after one session.', html=False)
+        self.assertContains(response, 'href="/account/register/?lang=en"')
+
+    def test_english_register_page_renders_registration_form_only(self):
+        response = self.client.get('/account/register/?lang=en')
+
+        self.assertTemplateUsed(response, 'analysis/account_register.html')
+        self.assertContains(response, 'Create your FitGap account')
+        self.assertContains(response, 'Create Account')
+        self.assertContains(response, 'Already have an account?')
+        self.assertContains(response, 'Sign in →')
         self.assertContains(response, 'Email')
         self.assertContains(response, 'Password')
         self.assertContains(response, 'Confirm password')
-        self.assertContains(response, 'Account features will support:')
-        self.assertContains(response, 'Save previous analyses')
-        self.assertContains(response, '← Back to FitGap')
-        self.assertContains(response, 'href="/?lang=en"')
-        self.assertContains(response, 'href="/account/?lang=zh"')
+        self.assertNotContains(response, 'Welcome back')
+        self.assertNotContains(response, 'New to FitGap?')
+        self.assertContains(response, 'Keep Your Progress with FitGap')
+        self.assertContains(response, 'href="/account/login/?lang=en"')
 
-    def test_chinese_account_entry_page_renders(self):
-        response = self.client.get('/account/?lang=zh')
+    def test_chinese_login_page_renders(self):
+        response = self.client.get('/account/login/?lang=zh')
 
-        self.assertContains(response, '欢迎使用 FitGap')
+        self.assertTemplateUsed(response, 'analysis/account_login.html')
+        self.assertContains(response, '欢迎回来')
         self.assertContains(response, '登录')
-        self.assertContains(response, '创建账号')
         self.assertContains(response, '第一次使用 FitGap？')
+        self.assertContains(response, '创建账号 →')
+        self.assertContains(response, '邮箱')
+        self.assertContains(response, '密码')
+        self.assertNotContains(response, '确认密码')
+        self.assertContains(response, '让你的 FitGap 分析持续积累')
+        self.assertContains(response, 'href="/account/register/?lang=zh"')
+
+    def test_chinese_register_page_renders(self):
+        response = self.client.get('/account/register/?lang=zh')
+
+        self.assertTemplateUsed(response, 'analysis/account_register.html')
+        self.assertContains(response, '创建你的 FitGap 账号')
+        self.assertContains(response, '创建账号')
+        self.assertContains(response, '已有账号？')
+        self.assertContains(response, '返回登录 →')
         self.assertContains(response, '邮箱')
         self.assertContains(response, '密码')
         self.assertContains(response, '确认密码')
-        self.assertContains(response, 'FitGap 账号后续将支持：')
-        self.assertContains(response, '保存历史分析')
-        self.assertContains(response, '← 返回 FitGap')
-        self.assertContains(response, 'href="/?lang=zh"')
-        self.assertContains(response, 'href="/account/?lang=en"')
+        self.assertNotContains(response, '欢迎回来')
+        self.assertContains(response, '让你的 FitGap 分析持续积累')
+        self.assertContains(response, 'href="/account/login/?lang=zh"')
+
+    def test_login_page_renders_account_drawer(self):
+        response = self.client.get('/account/login/?lang=en')
+
+        self._assert_guest_drawer(response)
+
+    def test_register_page_renders_account_drawer(self):
+        response = self.client.get('/account/register/?lang=en')
+
+        self._assert_guest_drawer(response)
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
     def test_english_roadmap_account_gate_context_renders_without_ai_calls(self, mock_prioritise, mock_roadmap):
-        response = self.client.get('/account/?lang=en&intent=roadmap')
+        response = self.client.get('/account/login/?lang=en&intent=roadmap')
 
         mock_prioritise.assert_not_called()
         mock_roadmap.assert_not_called()
-        self.assertTemplateUsed(response, 'analysis/account_entry.html')
+        self.assertTemplateUsed(response, 'analysis/account_login.html')
         self.assertContains(response, 'Unlock Your Personalised Learning Roadmap')
-        self.assertContains(response, 'Create an account or sign in to continue from your current skill priorities.')
-        self.assertContains(response, 'href="/account/?lang=zh&amp;intent=roadmap"', html=False)
-        self.assertContains(response, 'action="/account/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'Sign in or create an account to continue.')
+        self.assertContains(response, 'href="/account/login/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'action="/account/login/?lang=en&amp;intent=roadmap"', html=False)
         self.assertNotContains(response, 'My AI Learning Roadmap')
 
     def test_chinese_roadmap_account_gate_context_renders(self):
-        response = self.client.get('/account/?lang=zh&intent=roadmap')
+        response = self.client.get('/account/register/?lang=zh&intent=roadmap')
 
         self.assertContains(response, '解锁你的个性化学习路线')
-        self.assertContains(response, '注册或登录后，即可从当前技能优先级继续生成学习路线。')
-        self.assertContains(response, 'href="/account/?lang=en&amp;intent=roadmap"', html=False)
-        self.assertContains(response, 'action="/account/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(response, '登录或创建账号后继续。')
+        self.assertContains(response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'href="/account/login/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'action="/account/register/?lang=zh&amp;intent=roadmap"', html=False)
+
+    def test_login_register_links_preserve_roadmap_intent(self):
+        login_response = self.client.get('/account/login/?lang=en&intent=roadmap')
+        register_response = self.client.get('/account/register/?lang=en&intent=roadmap')
+
+        self.assertContains(login_response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertContains(register_response, 'href="/account/login/?lang=en&amp;intent=roadmap"', html=False)
+
+    def test_auth_language_switch_preserves_page_and_roadmap_intent(self):
+        login_response = self.client.get('/account/login/?lang=en&intent=roadmap')
+        register_response = self.client.get('/account/register/?lang=zh&intent=roadmap')
+
+        self.assertContains(login_response, 'href="/account/login/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(register_response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
+
+    def test_auth_password_fields_are_not_server_prefilled(self):
+        login_response = self.client.get('/account/login/?lang=en')
+        register_response = self.client.get('/account/register/?lang=en')
+
+        self.assertContains(login_response, 'type="password"', count=1)
+        self.assertContains(register_response, 'type="password"', count=2)
+        self.assertNotContains(login_response, 'name="login-password" value=')
+        self.assertNotContains(register_response, 'name="register-password" value=')
+        self.assertNotContains(register_response, 'name="register-confirm_password" value=')
 
     def test_valid_registration_creates_hashed_user_and_logs_in(self):
-        response = self.client.post('/account/?lang=en', data={
-            'account_action': 'create_account',
+        response = self.client.post('/account/register/?lang=en', data={
             'register-email': 'Student@Example.com',
             'register-password': 'VeryStrongPass123!',
             'register-confirm_password': 'VeryStrongPass123!',
@@ -1332,8 +1482,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertNotContains(response, 'Confirm password')
 
     def test_registration_with_roadmap_intent_redirects_to_new_analysis(self):
-        response = self.client.post('/account/?lang=en&intent=roadmap', data={
-            'account_action': 'create_account',
+        response = self.client.post('/account/register/?lang=en&intent=roadmap', data={
             'register-email': 'student@example.com',
             'register-password': 'VeryStrongPass123!',
             'register-confirm_password': 'VeryStrongPass123!',
@@ -1348,8 +1497,7 @@ class InterfaceLanguageTests(TestCase):
 
     def test_duplicate_email_registration_is_rejected_case_insensitively(self):
         self._create_user(email='student@example.com')
-        response = self.client.post('/account/?lang=en', data={
-            'account_action': 'create_account',
+        response = self.client.post('/account/register/?lang=en', data={
             'register-email': 'STUDENT@example.com',
             'register-password': 'VeryStrongPass123!',
             'register-confirm_password': 'VeryStrongPass123!',
@@ -1359,26 +1507,24 @@ class InterfaceLanguageTests(TestCase):
         self.assertEqual(get_user_model().objects.count(), 1)
 
     def test_registration_rejects_invalid_email_mismatched_passwords_and_missing_fields(self):
-        invalid_response = self.client.post('/account/?lang=en', data={
-            'account_action': 'create_account',
+        invalid_response = self.client.post('/account/register/?lang=en', data={
             'register-email': 'not-an-email',
             'register-password': 'VeryStrongPass123!',
             'register-confirm_password': 'DifferentPass123!',
         })
-        missing_response = self.client.post('/account/?lang=en', data={
-            'account_action': 'create_account',
-        })
+        missing_response = self.client.post('/account/register/?lang=en', data={})
 
         self.assertContains(invalid_response, 'Please enter a valid email address.')
         self.assertContains(invalid_response, 'The two passwords do not match.')
+        self.assertNotContains(invalid_response, 'VeryStrongPass123!')
+        self.assertNotContains(invalid_response, 'DifferentPass123!')
         self.assertContains(missing_response, 'Please enter your email address.')
         self.assertContains(missing_response, 'Please enter your password.')
         self.assertContains(missing_response, 'Please confirm your password.')
         self.assertEqual(get_user_model().objects.count(), 0)
 
     def test_registration_uses_django_password_validation(self):
-        response = self.client.post('/account/?lang=en', data={
-            'account_action': 'create_account',
+        response = self.client.post('/account/register/?lang=en', data={
             'register-email': 'student@example.com',
             'register-password': 'password',
             'register-confirm_password': 'password',
@@ -1389,8 +1535,7 @@ class InterfaceLanguageTests(TestCase):
 
     def test_valid_login_establishes_authenticated_session(self):
         self._create_user(email='student@example.com', password='VeryStrongPass123!')
-        response = self.client.post('/account/?lang=en', data={
-            'account_action': 'sign_in',
+        response = self.client.post('/account/login/?lang=en', data={
             'login-email': 'STUDENT@example.com',
             'login-password': 'VeryStrongPass123!',
         }, follow=True)
@@ -1402,30 +1547,27 @@ class InterfaceLanguageTests(TestCase):
 
     def test_login_rejects_invalid_unknown_and_missing_credentials(self):
         self._create_user(email='student@example.com', password='VeryStrongPass123!')
-        wrong_response = self.client.post('/account/?lang=en', data={
-            'account_action': 'sign_in',
+        wrong_response = self.client.post('/account/login/?lang=en', data={
             'login-email': 'student@example.com',
             'login-password': 'WrongPass123!',
         })
-        unknown_response = self.client.post('/account/?lang=en', data={
-            'account_action': 'sign_in',
+        unknown_response = self.client.post('/account/login/?lang=en', data={
             'login-email': 'unknown@example.com',
             'login-password': 'VeryStrongPass123!',
         })
-        missing_response = self.client.post('/account/?lang=en', data={
-            'account_action': 'sign_in',
-        })
+        missing_response = self.client.post('/account/login/?lang=en', data={})
 
         self.assertContains(wrong_response, 'The email or password is incorrect.')
+        self.assertNotContains(wrong_response, 'WrongPass123!')
         self.assertContains(unknown_response, 'The email or password is incorrect.')
+        self.assertNotContains(unknown_response, 'VeryStrongPass123!')
         self.assertContains(missing_response, 'Please enter your email address.')
         self.assertContains(missing_response, 'Please enter your password.')
         self.assertNotIn('_auth_user_id', self.client.session)
 
     def test_login_with_roadmap_intent_redirects_to_new_analysis(self):
         self._create_user(email='student@example.com', password='VeryStrongPass123!')
-        response = self.client.post('/account/?lang=en&intent=roadmap', data={
-            'account_action': 'sign_in',
+        response = self.client.post('/account/login/?lang=en&intent=roadmap', data={
             'login-email': 'student@example.com',
             'login-password': 'VeryStrongPass123!',
         }, follow=True)
@@ -1440,6 +1582,7 @@ class InterfaceLanguageTests(TestCase):
         self._login_user()
         response = self.client.get('/account/?lang=en')
 
+        self._assert_authenticated_drawer(response)
         self.assertContains(response, 'You&#x27;re signed in to FitGap', html=False)
         self.assertContains(response, 'student@example.com')
         self.assertContains(response, 'Your account can unlock personalised learning roadmaps.')
@@ -1496,6 +1639,7 @@ class InterfaceLanguageTests(TestCase):
         )
         self.assertContains(response, 'Language:')
         self.assertContains(response, '<strong aria-current="page" class="text-dark">English</strong>', html=True)
+        self._assert_guest_drawer(response)
         self.assertContains(
             response,
             '<h3 class="workflow-step-heading fw-bold mb-3">Step 1 · Upload or paste your CV</h3>',
@@ -1589,6 +1733,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
         self.assertContains(response, 'alt="FitGap - AI Skill-Gap Analysis"')
         self.assertContains(response, 'aria-label="FitGap"')
+        self._assert_guest_drawer(response)
         self.assertContains(response, 'action="/results/full-analysis/?lang=en"')
         self.assertContains(response, 'action="/results/full-analysis/?lang=zh"')
         self.assertContains(response, 'name="analysis_payload"')
@@ -1604,6 +1749,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
         self.assertContains(response, 'alt="FitGap - AI Skill-Gap Analysis"')
         self.assertContains(response, 'aria-label="FitGap"')
+        self._assert_guest_drawer(response)
         self.assertContains(response, 'action="/results/ai-results/?lang=en"')
         self.assertContains(response, 'action="/results/ai-results/?lang=zh"')
         self.assertContains(response, 'name="analysis_payload"')
@@ -1621,6 +1767,15 @@ class InterfaceLanguageTests(TestCase):
         self.assertTrue(asset_path.endswith('analysis/static/analysis/fitgap-logo.svg'))
         content = Path(asset_path).read_text()
         self.assertIn('<title id="fitgap-logo-title">FitGap</title>', content)
+
+    def test_account_drawer_iteration_adds_no_custom_migrations_or_history_models(self):
+        migration_files = sorted(Path('analysis/migrations').glob('*.py'))
+        model_source = Path('analysis/models.py').read_text()
+
+        self.assertEqual([path.name for path in migration_files], ['__init__.py'])
+        self.assertNotIn('AnalysisRecord', model_source)
+        self.assertNotIn('SavedRoadmap', model_source)
+        self.assertNotIn('SkillProgress', model_source)
 
     def test_textareas_still_render_on_input_page(self):
         response = self.client.get('/analyse/?lang=en')
@@ -1828,7 +1983,8 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'Create Free Account &amp; Build My Roadmap →', html=False)
         self.assertContains(response, 'Already have an account? Sign in')
         self.assertContains(response, 'No payment required.')
-        self.assertContains(response, 'href="/account/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'href="/account/login/?lang=en&amp;intent=roadmap"', html=False)
         self.assertNotContains(response, 'action="/results/ai-learning-roadmap/?lang=en"')
         self.assertNotContains(response, '✨ Build My AI Learning Roadmap →')
 
@@ -1846,7 +2002,8 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, '免费注册并生成学习路线 →')
         self.assertContains(response, '已有账号？登录')
         self.assertContains(response, '无需付费。')
-        self.assertContains(response, 'href="/account/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'href="/account/register/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(response, 'href="/account/login/?lang=zh&amp;intent=roadmap"', html=False)
         self.assertNotContains(response, 'action="/results/ai-learning-roadmap/?lang=zh"')
 
     @patch('analysis.views.generate_learning_roadmap')
@@ -1857,11 +2014,11 @@ class InterfaceLanguageTests(TestCase):
         ]
         response = self._post_ai_prioritisation(self._results_response('en'), 'en')
 
-        self.assertContains(response, 'href="/account/?lang=en&amp;intent=roadmap"', html=False)
-        account_response = self.client.get('/account/?lang=en&intent=roadmap')
+        self.assertContains(response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
+        account_response = self.client.get('/account/register/?lang=en&intent=roadmap')
 
         mock_roadmap.assert_not_called()
-        self.assertTemplateUsed(account_response, 'analysis/account_entry.html')
+        self.assertTemplateUsed(account_response, 'analysis/account_register.html')
         self.assertContains(account_response, 'Unlock Your Personalised Learning Roadmap')
 
     @patch('analysis.views.generate_learning_roadmap')
@@ -1960,6 +2117,7 @@ class InterfaceLanguageTests(TestCase):
         response = self._post_learning_roadmap(ai_response, 'en')
 
         self.assertTemplateUsed(response, 'analysis/learning_roadmap.html')
+        self._assert_authenticated_drawer(response)
         self.assertContains(response, 'My AI Learning Roadmap')
         self.assertContains(response, 'MINIMUM VIABLE LEARNING PATH')
         self.assertContains(response, 'IMMEDIATE NEXT ACTION')
@@ -2128,7 +2286,8 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(switched_response, '1 · Django')
         self.assertContains(switched_response, '2 · REST APIs')
         self.assertContains(switched_response, 'Django is explicitly required for backend work.')
-        self.assertContains(switched_response, 'href="/account/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(switched_response, 'href="/account/register/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(switched_response, 'href="/account/login/?lang=zh&amp;intent=roadmap"', html=False)
         self.assertContains(switched_response, '← 返回完整分析结果')
 
     @patch('analysis.views.prioritise_skill_gaps')

@@ -1,0 +1,131 @@
+<style>
+    .fitgap-account-menu-button {
+        border-color: #D7E3FF;
+        color: #1D63ED;
+        min-height: 2.5rem;
+    }
+
+    .fitgap-account-backdrop {
+        background: rgba(15, 23, 42, 0.35);
+        display: none;
+        inset: 0;
+        position: fixed;
+        z-index: 1040;
+    }
+
+    .fitgap-account-drawer {
+        background: #fff;
+        border-right: 1px solid #D7E3FF;
+        box-shadow: 0 1rem 3rem rgba(15, 23, 42, 0.16);
+        height: 100vh;
+        left: 0;
+        max-width: 90vw;
+        overflow-y: auto;
+        position: fixed;
+        top: 0;
+        transform: translateX(-100%);
+        transition: transform 0.18s ease;
+        width: min(320px, 88vw);
+        z-index: 1050;
+    }
+
+    .fitgap-account-drawer.is-open {
+        transform: translateX(0);
+    }
+
+    .fitgap-account-backdrop.is-open {
+        display: block;
+    }
+</style>
+
+<button
+    type="button"
+    class="btn btn-light fitgap-account-menu-button d-inline-flex align-items-center gap-2"
+    data-account-drawer-trigger
+    aria-controls="fitgap-account-drawer"
+    aria-expanded="false"
+    aria-label="{{ text.account_menu_open }}"
+    data-open-label="{{ text.account_menu_open }}"
+    data-close-label="{{ text.account_menu_close }}"
+>
+    <span aria-hidden="true" class="fs-4 lh-1">☰</span>
+    <span>{{ text.account_menu_trigger }}</span>
+</button>
+
+<div class="fitgap-account-backdrop" data-account-drawer-backdrop></div>
+
+<aside id="fitgap-account-drawer" class="fitgap-account-drawer" aria-label="{{ text.account_menu_title }}" tabindex="-1">
+    <div class="p-4">
+        <div class="d-flex align-items-start justify-content-between gap-3 mb-4">
+            <h2 class="h4 fw-bold mb-0" style="color: #1D63ED;">{{ text.account_menu_title }}</h2>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-account-drawer-close aria-label="{{ text.account_menu_close }}">
+                ×
+            </button>
+        </div>
+
+        {% if request.user.is_authenticated %}
+            <p class="text-uppercase small fw-bold text-muted mb-1">{{ text.account_drawer_signed_in }}</p>
+            <p class="fw-semibold mb-3">{{ request.user.email }}</p>
+            <div class="d-grid gap-2">
+                <a href="{% url 'analysis:input' %}?lang={{ language }}" class="btn btn-primary" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.account_drawer_start_new_analysis }}</a>
+                <a href="{% url 'analysis:account_entry' %}?lang={{ language }}" class="btn btn-outline-primary">{{ text.account_drawer_my_fitgap }}</a>
+                <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="account_action" value="logout">
+                    <button type="submit" class="btn btn-outline-secondary w-100">{{ text.account_drawer_log_out }}</button>
+                </form>
+            </div>
+        {% else %}
+            <p class="text-uppercase small fw-bold text-muted mb-1">{{ text.account_drawer_guest_status }}</p>
+            <p class="text-secondary mb-4">{{ text.account_drawer_guest_message }}</p>
+            <div class="d-grid gap-2">
+                <a href="{% url 'analysis:account_login' %}?lang={{ language }}" class="btn btn-primary" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.account_drawer_sign_in }}</a>
+                <a href="{% url 'analysis:account_register' %}?lang={{ language }}" class="btn btn-outline-primary">{{ text.account_drawer_create_account }}</a>
+            </div>
+        {% endif %}
+    </div>
+</aside>
+
+<script>
+    (() => {
+        const trigger = document.querySelector('[data-account-drawer-trigger]');
+        const drawer = document.querySelector('#fitgap-account-drawer');
+        const backdrop = document.querySelector('[data-account-drawer-backdrop]');
+        const closeButton = document.querySelector('[data-account-drawer-close]');
+
+        if (!trigger || !drawer || !backdrop || !closeButton) {
+            return;
+        }
+
+        const openDrawer = () => {
+            drawer.classList.add('is-open');
+            backdrop.classList.add('is-open');
+            trigger.setAttribute('aria-expanded', 'true');
+            trigger.setAttribute('aria-label', trigger.dataset.closeLabel);
+            drawer.focus();
+        };
+
+        const closeDrawer = () => {
+            drawer.classList.remove('is-open');
+            backdrop.classList.remove('is-open');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.setAttribute('aria-label', trigger.dataset.openLabel);
+            trigger.focus();
+        };
+
+        trigger.addEventListener('click', () => {
+            if (drawer.classList.contains('is-open')) {
+                closeDrawer();
+            } else {
+                openDrawer();
+            }
+        });
+        closeButton.addEventListener('click', closeDrawer);
+        backdrop.addEventListener('click', closeDrawer);
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && drawer.classList.contains('is-open')) {
+                closeDrawer();
+            }
+        });
+    })();
+</script>

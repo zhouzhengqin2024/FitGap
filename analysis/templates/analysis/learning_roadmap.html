@@ -10,9 +10,12 @@
 <body class="bg-light">
     <main class="container py-4 py-md-5">
         <header class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center justify-content-between gap-3 mb-5 mx-auto" style="max-width: 1120px;">
-            <a class="d-inline-flex align-items-center" href="{% url 'analysis:input' %}?lang={{ language }}" aria-label="FitGap">
-                <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
-            </a>
+            <div class="d-inline-flex align-items-center gap-3">
+                {% include 'analysis/partials/account_drawer.html' %}
+                <a class="d-inline-flex align-items-center" href="{% url 'analysis:input' %}?lang={{ language }}" aria-label="FitGap">
+                    <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
+                </a>
+            </div>
             <nav class="small d-flex gap-3 align-items-center" aria-label="Language selection">
                 <form method="post" action="{% url 'analysis:learning_roadmap' %}?lang=en">
                     {% csrf_token %}
