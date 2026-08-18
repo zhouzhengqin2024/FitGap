@@ -29,6 +29,7 @@ from .ai_prioritisation import (
     prioritise_skill_gaps,
     validate_ai_priorities,
 )
+from .models import AnalysisRecord
 from .services import (
     build_skill_evidence_details,
     calculate_match_score,
@@ -133,6 +134,59 @@ def _sample_roadmap(skills=None):
         },
         'skills': roadmap_skills,
     }
+
+
+class AnalysisRecordModelTests(TestCase):
+    def _create_user(self, email='student@example.com', password='StrongPass123!'):
+        User = get_user_model()
+        return User.objects.create_user(
+            username=email.lower(),
+            email=email.lower(),
+            password=password,
+        )
+
+    def test_analysis_record_can_be_created_for_authenticated_user(self):
+        user = self._create_user()
+
+        record = AnalysisRecord.objects.create(user=user, language='en', target_role='Untitled Analysis')
+
+        self.assertEqual(record.user, user)
+        self.assertEqual(record.language, 'en')
+        self.assertEqual(record.target_role, 'Untitled Analysis')
+
+    def test_analysis_record_requires_user_link(self):
+        user_field = AnalysisRecord._meta.get_field('user')
+
+        self.assertFalse(user_field.null)
+        self.assertEqual(user_field.remote_field.model, get_user_model())
+
+    def test_default_status_is_valid(self):
+        user = self._create_user()
+        record = AnalysisRecord.objects.create(user=user)
+
+        self.assertEqual(record.status, AnalysisRecord.STATUS_STARTED)
+        self.assertIn(record.status, dict(AnalysisRecord.STATUS_CHOICES))
+
+    def test_json_snapshots_store_structured_data(self):
+        user = self._create_user()
+        record = AnalysisRecord.objects.create(
+            user=user,
+            analysis_snapshot={'matched_skills': ['Python']},
+            priority_snapshot={'status': 'success', 'priorities': [{'skill': 'Django'}]},
+            roadmap_snapshot={'skills': [{'skill': 'Django', 'core_steps': [{'title': 'Build'}]}]},
+        )
+
+        record.refresh_from_db()
+        self.assertEqual(record.analysis_snapshot['matched_skills'], ['Python'])
+        self.assertEqual(record.priority_snapshot['priorities'][0]['skill'], 'Django')
+        self.assertEqual(record.roadmap_snapshot['skills'][0]['core_steps'][0]['title'], 'Build')
+
+    def test_timestamps_are_created(self):
+        user = self._create_user()
+        record = AnalysisRecord.objects.create(user=user)
+
+        self.assertIsNotNone(record.created_at)
+        self.assertIsNotNone(record.updated_at)
 
 
 class DocumentExtractionTests(SimpleTestCase):
@@ -1233,6 +1287,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'Signed in')
         self.assertContains(response, email)
         self.assertContains(response, 'Start New Analysis')
+        self.assertContains(response, 'My Analyses')
         self.assertContains(response, 'My FitGap')
         self.assertContains(response, 'Log out')
         self.assertContains(response, 'name="account_action" value="logout"')
@@ -1321,6 +1376,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, '已登录')
         self.assertContains(response, 'student@example.com')
         self.assertContains(response, '开始新的分析')
+        self.assertContains(response, '我的分析')
         self.assertContains(response, '我的 FitGap')
         self.assertContains(response, '退出登录')
         self.assertContains(response, '你的账号已可使用。开始新的分析，或进入我的 FitGap。')
@@ -1776,12 +1832,12 @@ class InterfaceLanguageTests(TestCase):
         content = Path(asset_path).read_text()
         self.assertIn('<title id="fitgap-logo-title">FitGap</title>', content)
 
-    def test_account_drawer_iteration_adds_no_custom_migrations_or_history_models(self):
+    def test_persistence_iteration_adds_only_analysis_record_migration_and_model(self):
         migration_files = sorted(Path('analysis/migrations').glob('*.py'))
         model_source = Path('analysis/models.py').read_text()
 
-        self.assertEqual([path.name for path in migration_files], ['__init__.py'])
-        self.assertNotIn('AnalysisRecord', model_source)
+        self.assertEqual([path.name for path in migration_files], ['0001_initial.py', '__init__.py'])
+        self.assertIn('class AnalysisRecord', model_source)
         self.assertNotIn('SavedRoadmap', model_source)
         self.assertNotIn('SkillProgress', model_source)
 
@@ -2185,6 +2241,273 @@ class InterfaceLanguageTests(TestCase):
 
         self.client.post('/account/?lang=en', data={'account_action': 'logout'})
         self.assertNotIn('pending_roadmap_continuity', self.client.session)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_authenticated_page_two_creates_analysis_record(self, mock_prioritise, mock_roadmap):
+        self._login_user()
+        response = self._results_response('en')
+        record = AnalysisRecord.objects.get()
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/results.html')
+        self.assertEqual(record.user.email, 'student@example.com')
+        self.assertEqual(record.status, AnalysisRecord.STATUS_ANALYSIS_COMPLETED)
+        self.assertEqual(record.analysis_snapshot['matched_skills'], ['Python', 'SQL'])
+        self.assertEqual(record.analysis_snapshot['missing_skills'], ['Django', 'REST APIs', 'JavaScript'])
+        self.assertEqual(self.client.session['current_analysis_record_id'], record.id)
+
+    def test_guest_page_two_does_not_create_analysis_record(self):
+        self._results_response('en')
+
+        self.assertEqual(AnalysisRecord.objects.count(), 0)
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_authenticated_page_three_updates_same_analysis_record(self, mock_prioritise):
+        self._login_user()
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        results_response = self._results_response('en')
+        record_id = AnalysisRecord.objects.get().id
+        response = self._post_ai_prioritisation(results_response, 'en')
+        record = AnalysisRecord.objects.get()
+
+        mock_prioritise.assert_called_once()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertEqual(record.id, record_id)
+        self.assertEqual(AnalysisRecord.objects.count(), 1)
+        self.assertEqual(record.status, AnalysisRecord.STATUS_PRIORITIES_COMPLETED)
+        self.assertEqual(record.priority_snapshot['status'], 'success')
+        self.assertEqual(record.priority_snapshot['priorities'][0]['skill'], 'Django')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_authenticated_page_four_updates_same_analysis_record(self, mock_prioritise, mock_roadmap):
+        self._login_user()
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django'])
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        record_id = AnalysisRecord.objects.get().id
+        response = self._post_learning_roadmap(ai_response, 'en')
+        record = AnalysisRecord.objects.get()
+
+        mock_roadmap.assert_called_once()
+        self.assertTemplateUsed(response, 'analysis/learning_roadmap.html')
+        self.assertEqual(record.id, record_id)
+        self.assertEqual(AnalysisRecord.objects.count(), 1)
+        self.assertEqual(record.status, AnalysisRecord.STATUS_ROADMAP_COMPLETED)
+        self.assertEqual(record.roadmap_snapshot['skills'][0]['skill'], 'Django')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_one_authenticated_journey_creates_only_one_record(self, mock_prioritise):
+        self._login_user()
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._switch_ai_results_language(response, 'zh')
+
+        self.assertEqual(AnalysisRecord.objects.count(), 1)
+
+    def test_start_new_analysis_keeps_old_record_and_clears_active_pointer(self):
+        self._login_user()
+        self._results_response('en')
+        old_record = AnalysisRecord.objects.get()
+
+        self.client.get('/analyse/?lang=en')
+
+        self.assertEqual(AnalysisRecord.objects.count(), 1)
+        self.assertEqual(AnalysisRecord.objects.get(), old_record)
+        self.assertNotIn('current_analysis_record_id', self.client.session)
+
+    def test_second_authenticated_journey_uses_new_record(self):
+        self._login_user()
+        self._results_response('en', cv_text='Python', job_description_text='Python Django')
+        first_record = AnalysisRecord.objects.get()
+        self.client.get('/analyse/?lang=en')
+        self._results_response('en', cv_text='SQL', job_description_text='SQL REST APIs')
+
+        self.assertEqual(AnalysisRecord.objects.count(), 2)
+        self.assertNotEqual(self.client.session['current_analysis_record_id'], first_record.id)
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_guest_page_three_does_not_create_persistent_record_before_auth(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+
+        self._post_ai_prioritisation(self._results_response('en'), 'en')
+
+        self.assertEqual(AnalysisRecord.objects.count(), 0)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_guest_login_continuity_creates_one_priorities_record_without_gemini(self, mock_prioritise, mock_roadmap):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django original priority.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._post_roadmap_auth_start(ai_response, 'en', 'login')
+        mock_prioritise.reset_mock()
+        response = self.client.post('/account/login/?lang=en&intent=roadmap', data={
+            'login-email': 'student@example.com',
+            'login-password': 'VeryStrongPass123!',
+        })
+        record = AnalysisRecord.objects.get()
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertEqual(record.status, AnalysisRecord.STATUS_PRIORITIES_COMPLETED)
+        self.assertEqual(record.priority_snapshot['priorities'][0]['reason'], 'Django original priority.')
+        self.assertEqual(self.client.session['current_analysis_record_id'], record.id)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_guest_register_continuity_creates_one_priorities_record_without_gemini(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'REST APIs', 'priority': 'medium', 'reason': 'REST APIs original priority.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._post_roadmap_auth_start(ai_response, 'en', 'register')
+        mock_prioritise.reset_mock()
+        response = self.client.post('/account/register/?lang=en&intent=roadmap', data={
+            'register-email': 'newstudent@example.com',
+            'register-password': 'VeryStrongPass123!',
+            'register-confirm_password': 'VeryStrongPass123!',
+        })
+        record = AnalysisRecord.objects.get()
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertEqual(AnalysisRecord.objects.count(), 1)
+        self.assertEqual(record.status, AnalysisRecord.STATUS_PRIORITIES_COMPLETED)
+        self.assertEqual(record.priority_snapshot['priorities'][0]['skill'], 'REST APIs')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_continuity_refresh_or_retry_does_not_duplicate_record(self, mock_prioritise):
+        self._create_user(email='student@example.com', password='VeryStrongPass123!')
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django original priority.'},
+        ]
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._post_roadmap_auth_start(ai_response, 'en', 'login')
+        self.client.post('/account/login/?lang=en&intent=roadmap', data={
+            'login-email': 'student@example.com',
+            'login-password': 'VeryStrongPass123!',
+        })
+        self.client.post('/account/login/?lang=en&intent=roadmap', data={
+            'login-email': 'student@example.com',
+            'login-password': 'VeryStrongPass123!',
+        })
+
+        self.assertEqual(AnalysisRecord.objects.count(), 1)
+
+    def test_history_requires_authentication(self):
+        response = self.client.get('/account/analyses/?lang=zh')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], '/account/login/?lang=zh')
+
+    def test_history_empty_state_renders_in_english_and_chinese(self):
+        self._login_user()
+        english_response = self.client.get('/account/analyses/?lang=en')
+        chinese_response = self.client.get('/account/analyses/?lang=zh')
+
+        self.assertTemplateUsed(english_response, 'analysis/history.html')
+        self.assertContains(english_response, 'My Analyses')
+        self.assertContains(english_response, 'You have not saved any analyses yet.')
+        self.assertContains(chinese_response, '我的分析')
+        self.assertContains(chinese_response, '你还没有保存任何分析记录。')
+
+    def test_history_displays_only_current_user_records_newest_first(self):
+        user_a = self._create_user(email='a@example.com')
+        user_b = self._create_user(email='b@example.com')
+        older = AnalysisRecord.objects.create(user=user_a, target_role='Older A')
+        newer = AnalysisRecord.objects.create(user=user_a, target_role='Newer A')
+        AnalysisRecord.objects.create(user=user_b, target_role='Private B')
+        self.client.login(username='a@example.com', password='StrongPass123!')
+        response = self.client.get('/account/analyses/?lang=en')
+        content = response.content.decode()
+
+        self.assertContains(response, 'Older A')
+        self.assertContains(response, 'Newer A')
+        self.assertNotContains(response, 'Private B')
+        self.assertLess(content.index('Newer A'), content.index('Older A'))
+        self.assertIn(older, AnalysisRecord.objects.filter(user=user_a))
+        self.assertIn(newer, AnalysisRecord.objects.filter(user=user_a))
+
+    def test_authenticated_drawer_links_to_my_analyses_and_guest_drawer_does_not(self):
+        guest_response = self.client.get('/?lang=en')
+        self.assertNotContains(guest_response, 'My Analyses')
+        self.assertNotContains(guest_response, 'href="/account/analyses/?lang=en"')
+
+        self._login_user()
+        auth_response = self.client.get('/?lang=en')
+        self.assertContains(auth_response, 'My Analyses')
+        self.assertContains(auth_response, 'href="/account/analyses/?lang=en"')
+
+    def test_chinese_authenticated_drawer_links_to_my_analyses(self):
+        self._login_user()
+        response = self.client.get('/?lang=zh')
+
+        self.assertContains(response, '我的分析')
+        self.assertContains(response, 'href="/account/analyses/?lang=zh"')
+
+    def test_session_record_pointer_validates_user_ownership(self):
+        owner = self._create_user(email='owner@example.com')
+        intruder = self._create_user(email='intruder@example.com')
+        other_record = AnalysisRecord.objects.create(user=owner, target_role='Owner Record')
+        self.client.login(username='intruder@example.com', password='StrongPass123!')
+        session = self.client.session
+        session['current_analysis_record_id'] = other_record.id
+        session.save()
+        self._results_response('en')
+
+        self.assertEqual(AnalysisRecord.objects.filter(user=owner).count(), 1)
+        self.assertEqual(AnalysisRecord.objects.filter(user=intruder).count(), 1)
+        self.assertNotEqual(self.client.session['current_analysis_record_id'], other_record.id)
+
+    def test_analysis_record_does_not_store_uploaded_file_or_raw_auth_data(self):
+        self._login_user(password='VeryStrongPass123!')
+        self._results_response(
+            'en',
+            cv_text='Python experience with private profile content.',
+            job_description_text='Python Django role description.',
+        )
+        record = AnalysisRecord.objects.get()
+        stored = str(record.analysis_snapshot)
+
+        self.assertNotIn('cv.pdf', stored)
+        self.assertNotIn('jd.docx', stored)
+        self.assertNotIn('VeryStrongPass123!', stored)
+
+    def test_analysis_snapshot_does_not_store_full_raw_cv_or_jd_text(self):
+        self._login_user()
+        raw_cv = 'Private CV introduction without recognised skill. Python.'
+        raw_jd = 'Confidential job description paragraph without recognised skill. Django.'
+        self._results_response('en', cv_text=raw_cv, job_description_text=raw_jd)
+        record = AnalysisRecord.objects.get()
+        stored = str(record.analysis_snapshot)
+
+        self.assertNotIn(raw_cv, stored)
+        self.assertNotIn(raw_jd, stored)
+        self.assertIn('Python', record.analysis_snapshot['cv_skills'])
+        self.assertIn('Django', record.analysis_snapshot['job_description_skills'])
+
+    def test_expected_analysis_record_migration_exists(self):
+        self.assertTrue(os.path.exists('analysis/migrations/0001_initial.py'))
+
+    def test_no_unrelated_business_models_added(self):
+        model_names = {model.__name__ for model in AnalysisRecord._meta.apps.get_app_config('analysis').get_models()}
+
+        self.assertEqual(model_names, {'AnalysisRecord'})
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')

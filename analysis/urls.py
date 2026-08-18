@@ -8,6 +8,7 @@ urlpatterns = [
     path('', views.landing_view, name='landing'),
     path('analyse/', views.input_view, name='input'),
     path('account/', views.account_entry_view, name='account_entry'),
+    path('account/analyses/', views.analysis_history_view, name='analysis_history'),
     path('account/login/', views.account_login_view, name='account_login'),
     path('account/register/', views.account_register_view, name='account_register'),
     path('account/roadmap-continuity/', views.roadmap_auth_start_view, name='roadmap_auth_start'),

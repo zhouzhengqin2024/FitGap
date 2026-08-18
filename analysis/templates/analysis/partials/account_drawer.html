@@ -68,6 +68,7 @@
             <p class="fw-semibold mb-3">{{ request.user.email }}</p>
             <div class="d-grid gap-2">
                 <a href="{% url 'analysis:input' %}?lang={{ language }}" class="btn btn-primary" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.account_drawer_start_new_analysis }}</a>
+                <a href="{% url 'analysis:analysis_history' %}?lang={{ language }}" class="btn btn-outline-primary">{{ text.account_drawer_my_analyses }}</a>
                 <a href="{% url 'analysis:account_entry' %}?lang={{ language }}" class="btn btn-outline-primary">{{ text.account_drawer_my_fitgap }}</a>
                 <form method="post" action="{% url 'analysis:account_entry' %}?lang={{ language }}">
                     {% csrf_token %}

@@ -5,6 +5,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
+from .models import AnalysisRecord
 from .ai_learning_roadmap import LearningRoadmapUnavailable, generate_learning_roadmap
 from .ai_prioritisation import AIPrioritisationUnavailable, prioritise_skill_gaps
 from .document_extraction import DocumentExtractionError, extract_document_text
@@ -19,6 +20,14 @@ from .services import (
 from .translations import get_translations, normalise_language
 
 PENDING_ROADMAP_CONTINUITY_KEY = 'pending_roadmap_continuity'
+CURRENT_ANALYSIS_RECORD_KEY = 'current_analysis_record_id'
+
+STATUS_ORDER = {
+    AnalysisRecord.STATUS_STARTED: 0,
+    AnalysisRecord.STATUS_ANALYSIS_COMPLETED: 1,
+    AnalysisRecord.STATUS_PRIORITIES_COMPLETED: 2,
+    AnalysisRecord.STATUS_ROADMAP_COMPLETED: 3,
+}
 
 
 def _get_selected_language(request):
@@ -57,6 +66,104 @@ def _get_extraction_error_message(text, code):
 
 def _sign_results(results):
     return signing.dumps(results, compress=True)
+
+
+def _default_target_role(language):
+    return '未命名分析' if language == 'zh' else 'Untitled Analysis'
+
+
+def _clear_current_analysis_record(request):
+    request.session.pop(CURRENT_ANALYSIS_RECORD_KEY, None)
+
+
+def _get_current_analysis_record(request):
+    if not request.user.is_authenticated:
+        return None
+
+    record_id = request.session.get(CURRENT_ANALYSIS_RECORD_KEY)
+    if not record_id:
+        return None
+
+    record = AnalysisRecord.objects.filter(id=record_id, user=request.user).first()
+    if record is None:
+        _clear_current_analysis_record(request)
+    return record
+
+
+def _get_or_create_current_analysis_record(request, language):
+    if not request.user.is_authenticated:
+        return None
+
+    record = _get_current_analysis_record(request)
+    if record is None:
+        record = AnalysisRecord.objects.create(
+            user=request.user,
+            language=language,
+            target_role=_default_target_role(language),
+        )
+        request.session[CURRENT_ANALYSIS_RECORD_KEY] = record.id
+    return record
+
+
+def _advance_record_status(record, status):
+    if STATUS_ORDER[status] > STATUS_ORDER.get(record.status, 0):
+        record.status = status
+
+
+def _analysis_snapshot(results):
+    return {
+        'cv_skills': results.get('cv_skills', []),
+        'job_description_skills': results.get('job_description_skills', []),
+        'matched_skills': results.get('matched_skills', []),
+        'missing_skills': results.get('missing_skills', []),
+        'match_score': results.get('match_score', 0),
+        'match_score_explanation': results.get('match_score_explanation', ''),
+        'matched_skill_details': results.get('matched_skill_details', []),
+        'missing_skill_details': results.get('missing_skill_details', []),
+        'learning_recommendations': results.get('learning_recommendations', []),
+    }
+
+
+def _persist_analysis_snapshot(request, language, results):
+    record = _get_or_create_current_analysis_record(request, language)
+    if record is None:
+        return None
+
+    record.language = language
+    record.analysis_snapshot = _analysis_snapshot(results)
+    _advance_record_status(record, AnalysisRecord.STATUS_ANALYSIS_COMPLETED)
+    record.save()
+    return record
+
+
+def _persist_priority_snapshot(request, language, results):
+    record = _get_or_create_current_analysis_record(request, language)
+    if record is None:
+        return None
+
+    if not record.analysis_snapshot:
+        record.analysis_snapshot = _analysis_snapshot(results)
+    record.language = language
+    record.priority_snapshot = results.get('ai_prioritisation', {})
+    _advance_record_status(record, AnalysisRecord.STATUS_PRIORITIES_COMPLETED)
+    record.save()
+    return record
+
+
+def _persist_roadmap_snapshot(request, language, results):
+    record = _get_or_create_current_analysis_record(request, language)
+    if record is None:
+        return None
+
+    if not record.analysis_snapshot:
+        record.analysis_snapshot = _analysis_snapshot(results)
+    if not record.priority_snapshot:
+        record.priority_snapshot = results.get('ai_prioritisation', {})
+    record.language = language
+    record.roadmap_snapshot = results.get('learning_roadmap', {})
+    _advance_record_status(record, AnalysisRecord.STATUS_ROADMAP_COMPLETED)
+    record.save()
+    return record
 
 
 def _apply_language_labels(results, language, text):
@@ -230,6 +337,7 @@ def _restore_pending_roadmap_continuity(request, language, text):
         return redirect(f'/analyse/?lang={language}')
 
     _clear_pending_roadmap_continuity(request)
+    _persist_priority_snapshot(request, language, results)
     messages.success(request, text['account_continue_roadmap'])
     return _render_ai_results(request, language, results, text)
 
@@ -255,6 +363,7 @@ def account_entry_view(request):
 
     if request.method == 'POST' and request.POST.get('account_action') == 'logout':
         _clear_pending_roadmap_continuity(request)
+        _clear_current_analysis_record(request)
         logout(request)
         messages.success(request, text['account_signed_out'])
         return redirect(f'/?lang={language}')
@@ -356,6 +465,38 @@ def roadmap_auth_start_view(request):
     return redirect(_account_login_url(language, roadmap_intent=True))
 
 
+def analysis_history_view(request):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    if not request.user.is_authenticated:
+        return redirect(_account_login_url(language))
+
+    status_labels = {
+        AnalysisRecord.STATUS_STARTED: text['analysis_status_started'],
+        AnalysisRecord.STATUS_ANALYSIS_COMPLETED: text['analysis_status_analysis_completed'],
+        AnalysisRecord.STATUS_PRIORITIES_COMPLETED: text['analysis_status_priorities_completed'],
+        AnalysisRecord.STATUS_ROADMAP_COMPLETED: text['analysis_status_roadmap_completed'],
+    }
+    record_items = [
+        {
+            'record': record,
+            'status_label': status_labels.get(record.status, record.status),
+        }
+        for record in AnalysisRecord.objects.filter(user=request.user).order_by('-created_at', '-id')
+    ]
+
+    return render(
+        request,
+        'analysis/history.html',
+        {
+            'language': language,
+            'record_items': record_items,
+            'text': text,
+        },
+    )
+
+
 @require_POST
 def extract_document_text_view(request):
     language = _get_selected_language(request)
@@ -389,6 +530,7 @@ def input_view(request):
 
     if request.method == 'GET':
         _clear_pending_roadmap_continuity(request)
+        _clear_current_analysis_record(request)
 
     if request.method == 'POST' and form.is_valid():
         cv_text = form.cleaned_data['cv_text']
@@ -424,6 +566,7 @@ def input_view(request):
             language,
         ))
 
+        _persist_analysis_snapshot(request, language, results)
         return _render_results(request, language, results, text)
 
     return render(
@@ -514,6 +657,7 @@ def ai_learning_roadmap_view(request):
 
     results['learning_roadmap'] = roadmap
     results.pop('learning_roadmap_status', None)
+    _persist_roadmap_snapshot(request, language, results)
     return _render_learning_roadmap(request, language, results, text)
 
 
@@ -543,6 +687,7 @@ def ai_prioritise_view(request):
             text,
             _add_ai_priority_labels(priorities, text),
         )
+        _persist_priority_snapshot(request, language, results)
         return _render_ai_results(request, language, results, text)
 
     return _render_results(request, language, results, text)
