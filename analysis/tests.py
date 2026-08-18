@@ -367,7 +367,7 @@ class ExtractSkillsTests(SimpleTestCase):
         self.assertEqual(extract_skills(None), [])
 
     def test_text_with_no_recognised_skills_returns_empty_list(self):
-        self.assertEqual(extract_skills('Excellent communication and stakeholder management.'), [])
+        self.assertEqual(extract_skills('A motivated candidate joined a growing company team.'), [])
 
     def test_avoids_partial_word_matches(self):
         text = 'The candidate used githubactions, mysqlite, postgraduate research, and a majestic style.'
@@ -386,6 +386,67 @@ class ExtractSkillsTests(SimpleTestCase):
             extract_skills(job_description_text),
             ['SQL', 'Git', 'Django', 'REST APIs', 'JavaScript'],
         )
+
+    def test_chemistry_catalogue_skills_are_extracted(self):
+        text = 'Experienced with HPLC, GC-MS, ChemDraw, organic synthesis and laboratory safety.'
+
+        self.assertEqual(
+            extract_skills(text),
+            ['ChemDraw', 'HPLC', 'GC-MS', 'Organic synthesis', 'Laboratory safety'],
+        )
+
+    def test_finance_catalogue_skills_are_extracted(self):
+        text = 'Strong Excel, IFRS, Bloomberg Terminal and financial modelling skills.'
+
+        self.assertEqual(
+            extract_skills(text),
+            ['Excel', 'Financial modelling', 'IFRS', 'Bloomberg Terminal'],
+        )
+
+    def test_marketing_catalogue_skills_are_extracted(self):
+        text = 'Experience with SEO, paid media, CRM and Google Analytics.'
+
+        self.assertEqual(
+            extract_skills(text),
+            ['SEO', 'CRM', 'Google Analytics', 'Paid media'],
+        )
+
+    def test_engineering_catalogue_skills_are_extracted(self):
+        text = 'Experienced with SolidWorks, CAD, FEA and manufacturing processes.'
+
+        self.assertEqual(
+            extract_skills(text),
+            ['SolidWorks', 'CAD', 'FEA', 'Manufacturing processes'],
+        )
+
+    def test_transferable_catalogue_skills_are_extracted(self):
+        text = 'Communication, stakeholder management and project management are required.'
+
+        self.assertEqual(
+            extract_skills(text),
+            ['Stakeholder management', 'Project management', 'Communication'],
+        )
+
+    def test_uncatalogued_skill_like_phrase_is_discovered(self):
+        text = 'Experience with chromatographic method validation is desirable.'
+
+        self.assertEqual(extract_skills(text), ['Chromatographic method validation'])
+
+    def test_generic_job_text_does_not_become_skills(self):
+        text = (
+            'We are a growing company looking for a motivated candidate to join our team '
+            'and take responsibility for exciting opportunities.'
+        )
+
+        self.assertEqual(extract_skills(text), [])
+
+    def test_cross_domain_alias_duplicates_are_removed(self):
+        text = 'HPLC and high-performance liquid chromatography. GC-MS and GC MS.'
+
+        self.assertEqual(extract_skills(text), ['HPLC', 'GC-MS'])
+
+    def test_common_hyphen_variants_normalise_to_same_skill(self):
+        self.assertEqual(extract_skills('Hands-on GC–MS analysis.'), ['GC-MS'])
 
 
 class CompareSkillsTests(SimpleTestCase):
@@ -421,7 +482,7 @@ class CompareSkillsTests(SimpleTestCase):
             compare_skills([], ['Python', 'SQL']),
             {
                 'matched_skills': [],
-                'missing_skills': [],
+                'missing_skills': ['Python', 'SQL'],
             },
         )
 
@@ -473,6 +534,68 @@ class CompareSkillsTests(SimpleTestCase):
             },
         )
 
+    def test_chemistry_fixture_matches_against_job_description_reference_set(self):
+        cv_skills = extract_skills('Experienced with HPLC, NMR spectroscopy and laboratory safety.')
+        jd_skills = extract_skills(
+            'Applicants should have experience with HPLC, GC-MS, ChemDraw, organic synthesis and laboratory safety.'
+        )
+
+        self.assertEqual(
+            compare_skills(cv_skills, jd_skills),
+            {
+                'matched_skills': ['HPLC', 'Laboratory safety'],
+                'missing_skills': ['ChemDraw', 'GC-MS', 'Organic synthesis'],
+            },
+        )
+
+    def test_finance_fixture_matches_and_missing(self):
+        cv_skills = extract_skills('Strong Excel and financial modelling skills.')
+        jd_skills = extract_skills('Requires Excel, IFRS knowledge, Bloomberg Terminal and financial modelling.')
+
+        self.assertEqual(
+            compare_skills(cv_skills, jd_skills),
+            {
+                'matched_skills': ['Excel', 'Financial modelling'],
+                'missing_skills': ['IFRS', 'Bloomberg Terminal'],
+            },
+        )
+
+    def test_marketing_fixture_matches_and_missing(self):
+        cv_skills = extract_skills('Experience with SEO, Google Analytics and CRM.')
+        jd_skills = extract_skills('Looking for SEO, paid media, CRM and Google Analytics.')
+
+        self.assertEqual(
+            compare_skills(cv_skills, jd_skills),
+            {
+                'matched_skills': ['SEO', 'CRM', 'Google Analytics'],
+                'missing_skills': ['Paid media'],
+            },
+        )
+
+    def test_engineering_fixture_matches_and_missing(self):
+        cv_skills = extract_skills('Experienced with SolidWorks, CAD and manufacturing processes.')
+        jd_skills = extract_skills('Requires SolidWorks, CAD, FEA and manufacturing processes.')
+
+        self.assertEqual(
+            compare_skills(cv_skills, jd_skills),
+            {
+                'matched_skills': ['SolidWorks', 'CAD', 'Manufacturing processes'],
+                'missing_skills': ['FEA'],
+            },
+        )
+
+    def test_dynamic_job_description_candidate_becomes_missing_when_absent_from_cv(self):
+        cv_skills = extract_skills('Experienced laboratory assistant.')
+        jd_skills = extract_skills('Experience with chromatographic method validation is desirable.')
+
+        self.assertEqual(
+            compare_skills(cv_skills, jd_skills),
+            {
+                'matched_skills': [],
+                'missing_skills': ['Chromatographic method validation'],
+            },
+        )
+
 
 class CalculateMatchScoreTests(SimpleTestCase):
     def test_full_match_returns_100(self):
@@ -498,6 +621,36 @@ class CalculateMatchScoreTests(SimpleTestCase):
 
     def test_matched_skill_not_in_job_description_is_not_counted(self):
         self.assertEqual(calculate_match_score(['Python', 'Django'], ['Python', 'SQL']), 50)
+
+    def test_chemistry_fixture_score_uses_verified_job_description_skills(self):
+        cv_skills = extract_skills('Experienced with HPLC, NMR spectroscopy and laboratory safety.')
+        jd_skills = extract_skills(
+            'Applicants should have experience with HPLC, GC-MS, ChemDraw, organic synthesis and laboratory safety.'
+        )
+        comparison = compare_skills(cv_skills, jd_skills)
+
+        self.assertEqual(calculate_match_score(comparison['matched_skills'], jd_skills), 40)
+
+    def test_finance_fixture_score_uses_verified_job_description_skills(self):
+        cv_skills = extract_skills('Strong Excel and financial modelling skills.')
+        jd_skills = extract_skills('Requires Excel, IFRS knowledge, Bloomberg Terminal and financial modelling.')
+        comparison = compare_skills(cv_skills, jd_skills)
+
+        self.assertEqual(calculate_match_score(comparison['matched_skills'], jd_skills), 50)
+
+    def test_marketing_fixture_score_uses_verified_job_description_skills(self):
+        cv_skills = extract_skills('Experience with SEO, Google Analytics and CRM.')
+        jd_skills = extract_skills('Looking for SEO, paid media, CRM and Google Analytics.')
+        comparison = compare_skills(cv_skills, jd_skills)
+
+        self.assertEqual(calculate_match_score(comparison['matched_skills'], jd_skills), 75)
+
+    def test_engineering_fixture_score_uses_verified_job_description_skills(self):
+        cv_skills = extract_skills('Experienced with SolidWorks, CAD and manufacturing processes.')
+        jd_skills = extract_skills('Requires SolidWorks, CAD, FEA and manufacturing processes.')
+        comparison = compare_skills(cv_skills, jd_skills)
+
+        self.assertEqual(calculate_match_score(comparison['matched_skills'], jd_skills), 75)
 
 
 class GenerateLearningRecommendationsTests(SimpleTestCase):
@@ -557,8 +710,8 @@ class GenerateLearningRecommendationsTests(SimpleTestCase):
             [{
                 'skill': 'Cloud Security',
                 'recommendation': (
-                    'Review the fundamentals of this skill, complete a structured tutorial, and apply it in a small '
-                    'practical project.'
+                    'Review the role requirements for this skill and identify practical training, coursework, '
+                    'or supervised experience that can demonstrate it.'
                 ),
             }],
         )
@@ -673,6 +826,96 @@ class SkillEvidenceTests(SimpleTestCase):
         self.assertEqual(extract_skill_evidence('', 'Python'), [])
         self.assertEqual(extract_skill_evidence(None, 'Python'), [])
         self.assertEqual(extract_skill_evidence('   \n\t', 'Python'), [])
+
+    def test_chemistry_fixture_evidence_is_verifiable(self):
+        cv_text = 'Experienced with HPLC, NMR spectroscopy and laboratory safety.'
+        jd_text = 'Applicants should have experience with HPLC, GC-MS, ChemDraw, organic synthesis and laboratory safety.'
+        cv_skills = extract_skills(cv_text)
+        jd_skills = extract_skills(jd_text)
+        comparison = compare_skills(cv_skills, jd_skills)
+        details = build_skill_evidence_details(
+            comparison['matched_skills'],
+            comparison['missing_skills'],
+            cv_text,
+            jd_text,
+        )
+
+        hplc_detail = details['matched_skill_details'][0]
+        gc_ms_detail = details['missing_skill_details'][1]
+
+        self.assertEqual(hplc_detail['skill'], 'HPLC')
+        self.assertEqual(hplc_detail['cv_evidence'][0]['matched_term'], 'HPLC')
+        self.assertEqual(hplc_detail['jd_evidence'][0]['matched_term'], 'HPLC')
+        self.assertEqual(gc_ms_detail['skill'], 'GC-MS')
+        self.assertEqual(gc_ms_detail['cv_evidence'], [])
+        self.assertEqual(gc_ms_detail['jd_evidence'][0]['matched_term'], 'GC-MS')
+
+    def test_finance_marketing_and_engineering_evidence_is_verifiable(self):
+        examples = [
+            (
+                'Strong Excel and financial modelling skills.',
+                'Requires Excel, IFRS knowledge, Bloomberg Terminal and financial modelling.',
+                'Excel',
+                'IFRS',
+            ),
+            (
+                'Experience with SEO, Google Analytics and CRM.',
+                'Looking for SEO, paid media, CRM and Google Analytics.',
+                'SEO',
+                'Paid media',
+            ),
+            (
+                'Experienced with SolidWorks, CAD and manufacturing processes.',
+                'Requires SolidWorks, CAD, FEA and manufacturing processes.',
+                'SolidWorks',
+                'FEA',
+            ),
+        ]
+
+        for cv_text, jd_text, expected_matched, expected_missing in examples:
+            cv_skills = extract_skills(cv_text)
+            jd_skills = extract_skills(jd_text)
+            comparison = compare_skills(cv_skills, jd_skills)
+            details = build_skill_evidence_details(
+                comparison['matched_skills'],
+                comparison['missing_skills'],
+                cv_text,
+                jd_text,
+            )
+
+            matched_detail = next(item for item in details['matched_skill_details'] if item['skill'] == expected_matched)
+            missing_detail = next(item for item in details['missing_skill_details'] if item['skill'] == expected_missing)
+
+            self.assertTrue(matched_detail['cv_evidence'])
+            self.assertTrue(matched_detail['jd_evidence'])
+            self.assertTrue(missing_detail['jd_evidence'])
+            self.assertEqual(missing_detail['cv_evidence'], [])
+
+    def test_dynamic_candidate_evidence_comes_from_source_text(self):
+        jd_text = 'Experience with chromatographic method validation is desirable.'
+        details = build_skill_evidence_details(
+            [],
+            ['Chromatographic method validation'],
+            'No chromatography experience.',
+            jd_text,
+        )
+        evidence = details['missing_skill_details'][0]['jd_evidence'][0]
+
+        self.assertEqual(evidence['excerpt'], jd_text)
+        self.assertEqual(evidence['matched_term'], 'chromatographic method validation')
+        self.assertFalse(evidence['is_alias'])
+        self.assertEqual(details['missing_skill_details'][0]['source'], 'candidate')
+
+    def test_catalogue_skill_details_include_category_metadata(self):
+        details = build_skill_evidence_details(
+            ['HPLC'],
+            [],
+            'HPLC experience.',
+            'HPLC is required.',
+        )
+
+        self.assertEqual(details['matched_skill_details'][0]['category'], 'Laboratory & Scientific Methods')
+        self.assertEqual(details['matched_skill_details'][0]['source'], 'catalogue')
 
 
 class AIPrioritisationServiceTests(SimpleTestCase):
@@ -823,6 +1066,31 @@ class LearningRoadmapServiceTests(SimpleTestCase):
             }],
         })
 
+    def test_build_learning_roadmap_input_accepts_cross_domain_priority_gaps(self):
+        roadmap_input = build_learning_roadmap_input({
+            'cv_skills': ['HPLC', 'Laboratory safety'],
+            'missing_skill_details': [{
+                'skill': 'GC-MS',
+                'jd_evidence': [{'excerpt': 'GC-MS experience is required.'}],
+                'cv_evidence': [],
+            }],
+            'ai_prioritisation': {
+                'status': 'success',
+                'priorities': [{'skill': 'GC-MS', 'priority': 'high', 'reason': 'Required laboratory method.'}],
+            },
+        })
+
+        self.assertEqual(roadmap_input, {
+            'existing_skills': ['HPLC', 'Laboratory safety'],
+            'priority_gaps': [{
+                'skill': 'GC-MS',
+                'priority': 'high',
+                'priority_reason': 'Required laboratory method.',
+                'jd_evidence': ['GC-MS experience is required.'],
+                'cv_evidence': None,
+            }],
+        })
+
     def test_validate_learning_roadmap_accepts_valid_structure(self):
         roadmap = validate_learning_roadmap(_sample_roadmap(['Django']), ['Django'])
 
@@ -839,6 +1107,12 @@ class LearningRoadmapServiceTests(SimpleTestCase):
         self.assertIn('minimum_features', roadmap['skills'][0]['details'])
         self.assertIn('interview_talking_points', roadmap['skills'][0]['details'])
         self.assertIn('cv_usage_guidance', roadmap['skills'][0]['details'])
+
+    def test_validate_learning_roadmap_accepts_cross_domain_verified_skill(self):
+        roadmap = validate_learning_roadmap(_sample_roadmap(['GC-MS']), ['GC-MS'])
+
+        self.assertEqual(roadmap['summary']['immediate_next_action']['skill'], 'GC-MS')
+        self.assertEqual(roadmap['skills'][0]['skill'], 'GC-MS')
 
     def test_validate_learning_roadmap_accepts_chinese_prose_with_canonical_machine_values(self):
         roadmap_data = _sample_roadmap(['Django'])
@@ -3367,6 +3641,25 @@ class InterfaceLanguageTests(TestCase):
         mock_prioritise.assert_called_once()
         self.assertContains(response, 'Django is the only verified gap.')
 
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_prioritisation_receives_cross_domain_verified_missing_skills(self, mock_prioritise):
+        mock_prioritise.return_value = [
+            {'skill': 'GC-MS', 'priority': 'high', 'reason': 'GC-MS is explicitly required.'},
+            {'skill': 'ChemDraw', 'priority': 'medium', 'reason': 'ChemDraw supports the laboratory workflow.'},
+        ]
+        results_response = self._results_response(
+            'en',
+            cv_text='Experienced with HPLC and laboratory safety.',
+            job_description_text='Applicants should have experience with HPLC, GC-MS, ChemDraw and laboratory safety.',
+        )
+        response = self._post_ai_prioritisation(results_response, 'en')
+        missing_skill_details = mock_prioritise.call_args.args[0]
+
+        self.assertEqual([item['skill'] for item in missing_skill_details], ['ChemDraw', 'GC-MS'])
+        self.assertEqual(missing_skill_details[0]['cv_evidence'], [])
+        self.assertIn('ChemDraw', missing_skill_details[0]['jd_evidence'][0]['excerpt'])
+        self.assertContains(response, 'GC-MS is explicitly required.')
+
     def test_english_results_page(self):
         response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL Git',
@@ -3388,6 +3681,36 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'No configured occurrence or alias was found in the CV.')
         self.assertContains(response, '<span class="badge text-bg-success">Matched</span>', html=True)
         self.assertContains(response, '<span class="badge text-bg-warning">Missing</span>', html=True)
+
+    def test_chemistry_results_page_displays_cross_domain_analysis(self):
+        response = self.client.post('/analyse/?lang=en', data={
+            'cv_text': 'Experienced with HPLC, NMR spectroscopy and laboratory safety.',
+            'job_description_text': (
+                'Applicants should have experience with HPLC, GC-MS, ChemDraw, organic synthesis and laboratory safety.'
+            ),
+            'output_language': 'en',
+        })
+        results = response.context['results']
+
+        self.assertContains(response, '40%')
+        self.assertContains(response, 'HPLC')
+        self.assertContains(response, 'GC-MS')
+        self.assertContains(response, 'Organic synthesis')
+        self.assertEqual(results['matched_skills'], ['HPLC', 'Laboratory safety'])
+        self.assertEqual(results['missing_skills'], ['ChemDraw', 'GC-MS', 'Organic synthesis'])
+
+    def test_dynamic_candidate_results_page_displays_verified_missing_skill(self):
+        response = self.client.post('/analyse/?lang=en', data={
+            'cv_text': 'Experienced laboratory assistant.',
+            'job_description_text': 'Experience with chromatographic method validation is desirable.',
+            'output_language': 'en',
+        })
+        results = response.context['results']
+
+        self.assertContains(response, 'Chromatographic method validation')
+        self.assertContains(response, '<mark>chromatographic method validation</mark>', html=True)
+        self.assertEqual(results['missing_skills'], ['Chromatographic method validation'])
+        self.assertEqual(results['missing_skill_details'][0]['source'], 'candidate')
 
     def test_duplicated_plain_matched_and_missing_skill_lists_are_removed(self):
         response = self.client.post('/analyse/?lang=en', data={
@@ -3503,7 +3826,7 @@ class InterfaceLanguageTests(TestCase):
     def test_english_zero_job_description_skill_explanation(self):
         response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Python SQL',
-            'job_description_text': 'communication teamwork',
+            'job_description_text': 'company team opportunity',
             'output_language': 'en',
         })
 
@@ -3513,7 +3836,7 @@ class InterfaceLanguageTests(TestCase):
     def test_chinese_zero_job_description_skill_explanation(self):
         response = self.client.post('/analyse/?lang=zh', data={
             'cv_text': 'Python SQL',
-            'job_description_text': 'communication teamwork',
+            'job_description_text': 'company team opportunity',
             'output_language': 'zh',
         })
 

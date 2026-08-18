@@ -1,19 +1,14 @@
 import re
 
-
-SKILL_CATALOGUE = [
-    ('Python', ['python']),
-    ('SQL', ['sql', 'mysql', 'postgresql', 'postgres']),
-    ('Git', ['git', 'github', 'gitlab']),
-    ('Django', ['django']),
-    ('REST APIs', ['rest api', 'rest APIs', 'restful api', 'restful APIs']),
-    ('JavaScript', ['javascript', 'js']),
-    ('HTML', ['html', 'html5']),
-    ('CSS', ['css', 'css3']),
-    ('Bootstrap', ['bootstrap']),
-    ('Machine Learning', ['machine learning', 'ml']),
-    ('Artificial Intelligence', ['artificial intelligence', 'ai']),
-]
+from .skill_candidates import discover_skill_candidates
+from .skill_catalogue import (
+    SKILL_CATALOGUE,
+    SKILL_CATALOGUE_ENTRIES,
+    get_aliases_for_skill,
+    get_category_for_skill,
+    get_source_for_skill,
+)
+from .skill_normalisation import normalise_skill_key
 
 RECOMMENDATION_CATALOGUE = {
     'Python': {
@@ -63,8 +58,11 @@ RECOMMENDATION_CATALOGUE = {
 }
 
 GENERIC_RECOMMENDATION = {
-    'en': 'Review the fundamentals of this skill, complete a structured tutorial, and apply it in a small practical project.',
-    'zh': '复习该技能的基础知识，完成一个结构化教程，并在一个小型实践项目中应用。',
+    'en': (
+        'Review the role requirements for this skill and identify practical training, coursework, '
+        'or supervised experience that can demonstrate it.'
+    ),
+    'zh': '复查该技能对应的岗位要求，并寻找能证明该技能的实践训练、课程作业或受指导经验。',
 }
 
 MAX_EVIDENCE_EXCERPTS = 2
@@ -87,14 +85,13 @@ CLASSIFICATION_EXPLANATIONS = {
 def _build_alias_pattern(alias):
     escaped_alias = re.escape(alias)
     flexible_spaces = escaped_alias.replace(r'\ ', r'\s+')
-    return rf'(?<![A-Za-z0-9]){flexible_spaces}(?![A-Za-z0-9])'
+    flexible_hyphens = flexible_spaces.replace(r'\-', r'[-\u2010-\u2015\s]+')
+    flexible_hyphens = flexible_hyphens.replace('–', r'[-\u2010-\u2015\s]+')
+    return rf'(?<![A-Za-z0-9]){flexible_hyphens}(?![A-Za-z0-9])'
 
 
 def _get_aliases_for_skill(skill):
-    for canonical_skill, aliases in SKILL_CATALOGUE:
-        if canonical_skill.lower() == skill.lower():
-            return aliases
-    return [skill]
+    return get_aliases_for_skill(skill)
 
 
 def _normalise_language(language):
@@ -123,18 +120,28 @@ def _split_evidence_fragments(text):
 
 
 def extract_skills(text):
-    """Extract recognised skills from plain text using deterministic catalogue matching."""
+    """Extract recognised skills from plain text using deterministic catalogue and candidate matching."""
     if not text:
         return []
 
     extracted_skills = []
+    seen_skills = set()
 
-    for canonical_skill, aliases in SKILL_CATALOGUE:
-        for alias in aliases:
+    for entry in SKILL_CATALOGUE_ENTRIES:
+        canonical_skill = entry['canonical']
+        for alias in entry['aliases']:
             # The lookarounds avoid matching aliases inside longer words.
             if re.search(_build_alias_pattern(alias), text, flags=re.IGNORECASE):
+                seen_skills.add(normalise_skill_key(canonical_skill))
                 extracted_skills.append(canonical_skill)
                 break
+
+    for candidate in discover_skill_candidates(text):
+        normalised_candidate = normalise_skill_key(candidate['canonical'])
+        if normalised_candidate in seen_skills:
+            continue
+        seen_skills.add(normalised_candidate)
+        extracted_skills.append(candidate['canonical'])
 
     return extracted_skills
 
@@ -173,7 +180,7 @@ def extract_skill_evidence_occurrences(text, skill, max_excerpts=MAX_EVIDENCE_EX
                     occurrences.append({
                         'excerpt': fragment,
                         'matched_term': matched_term,
-                        'is_alias': alias.lower() != skill.lower(),
+                        'is_alias': normalise_skill_key(alias) != normalise_skill_key(skill),
                         'highlight_parts': _build_highlight_parts(fragment, match.start(), match.end()),
                     })
 
@@ -192,6 +199,8 @@ def build_skill_evidence_details(matched_skills, missing_skills, cv_text, job_de
         {
             'skill': skill,
             'status': 'matched',
+            'category': get_category_for_skill(skill),
+            'source': get_source_for_skill(skill),
             'cv_evidence': extract_skill_evidence_occurrences(cv_text, skill),
             'jd_evidence': extract_skill_evidence_occurrences(job_description_text, skill),
             'explanation': CLASSIFICATION_EXPLANATIONS[selected_language]['matched'].format(skill=skill),
@@ -202,6 +211,8 @@ def build_skill_evidence_details(matched_skills, missing_skills, cv_text, job_de
         {
             'skill': skill,
             'status': 'missing',
+            'category': get_category_for_skill(skill),
+            'source': get_source_for_skill(skill),
             'cv_evidence': [],
             'jd_evidence': extract_skill_evidence_occurrences(job_description_text, skill),
             'explanation': CLASSIFICATION_EXPLANATIONS[selected_language]['missing'].format(skill=skill),
@@ -217,19 +228,19 @@ def build_skill_evidence_details(matched_skills, missing_skills, cv_text, job_de
 
 def compare_skills(cv_skills, job_description_skills):
     """Compare extracted CV and job description skills using exact case-insensitive matching."""
-    if not cv_skills or not job_description_skills:
+    if not job_description_skills:
         return {
             'matched_skills': [],
             'missing_skills': [],
         }
 
-    cv_skill_lookup = {skill.lower() for skill in cv_skills}
+    cv_skill_lookup = {normalise_skill_key(skill) for skill in cv_skills}
     seen_job_description_skills = set()
     matched_skills = []
     missing_skills = []
 
     for skill in job_description_skills:
-        normalised_skill = skill.lower()
+        normalised_skill = normalise_skill_key(skill)
 
         # Keep the first JD occurrence only so each result skill appears once.
         if normalised_skill in seen_job_description_skills:
@@ -250,12 +261,12 @@ def compare_skills(cv_skills, job_description_skills):
 
 def calculate_match_score(matched_skills, job_description_skills):
     """Calculate the percentage of recognised job description skills found in the CV."""
-    unique_job_description_skills = {skill.lower() for skill in job_description_skills}
+    unique_job_description_skills = {normalise_skill_key(skill) for skill in job_description_skills}
 
     if not unique_job_description_skills:
         return 0
 
-    unique_matched_skills = {skill.lower() for skill in matched_skills}
+    unique_matched_skills = {normalise_skill_key(skill) for skill in matched_skills}
     counted_matches = unique_matched_skills.intersection(unique_job_description_skills)
     score = (len(counted_matches) / len(unique_job_description_skills)) * 100
 
@@ -269,14 +280,14 @@ def generate_learning_recommendations(missing_skills, language):
 
     selected_language = language if language in {'en', 'zh'} else 'en'
     catalogue_lookup = {
-        skill.lower(): recommendations
+        normalise_skill_key(skill): recommendations
         for skill, recommendations in RECOMMENDATION_CATALOGUE.items()
     }
     seen_skills = set()
     recommendations = []
 
     for skill in missing_skills:
-        normalised_skill = skill.lower()
+        normalised_skill = normalise_skill_key(skill)
 
         if normalised_skill in seen_skills:
             continue
