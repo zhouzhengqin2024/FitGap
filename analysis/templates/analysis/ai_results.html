@@ -16,20 +16,7 @@
                     <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
                 </a>
             </div>
-            <nav class="small d-flex gap-3 align-items-center" aria-label="Language selection">
-                <form method="post" action="{% url 'analysis:ai_results' %}?lang=en">
-                    {% csrf_token %}
-                    <input type="hidden" name="output_language" value="en">
-                    <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
-                    <button type="submit" class="btn btn-link btn-sm p-0{% if language == 'en' %} fw-bold text-dark{% endif %}"{% if language == 'en' %} aria-current="page"{% endif %}>English</button>
-                </form>
-                <form method="post" action="{% url 'analysis:ai_results' %}?lang=zh">
-                    {% csrf_token %}
-                    <input type="hidden" name="output_language" value="zh">
-                    <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
-                    <button type="submit" class="btn btn-link btn-sm p-0{% if language == 'zh' %} fw-bold text-dark{% endif %}"{% if language == 'zh' %} aria-current="page"{% endif %}>简体中文</button>
-                </form>
-            </nav>
+            {% include 'analysis/partials/language_selector.html' %}
         </header>
 
         <div class="row justify-content-center">

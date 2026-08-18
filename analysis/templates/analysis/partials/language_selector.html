@@ -1,0 +1,144 @@
+<style>
+    .fitgap-language-selector {
+        position: relative;
+    }
+
+    .fitgap-language-button {
+        background: #fff;
+        border: 1px solid #D7E3FF;
+        border-radius: 0.5rem;
+        color: #1f2937;
+        min-height: 2.5rem;
+    }
+
+    .fitgap-language-button:focus-visible,
+    .fitgap-language-option:focus-visible {
+        box-shadow: 0 0 0 0.2rem rgba(29, 99, 237, 0.25);
+        outline: 0;
+    }
+
+    .fitgap-language-menu {
+        background: #fff;
+        border: 1px solid #D7E3FF;
+        border-radius: 0.5rem;
+        box-shadow: 0 0.75rem 2rem rgba(15, 23, 42, 0.14);
+        display: none;
+        min-width: 12rem;
+        padding: 0.35rem;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 0.4rem);
+        z-index: 30;
+    }
+
+    .fitgap-language-menu.is-open {
+        display: block;
+    }
+
+    .fitgap-language-option {
+        align-items: center;
+        background: transparent;
+        border: 0;
+        border-radius: 0.35rem;
+        color: #212529;
+        display: flex;
+        gap: 0.5rem;
+        min-height: 2.4rem;
+        padding: 0.5rem 0.65rem;
+        text-align: left;
+        text-decoration: none;
+        width: 100%;
+    }
+
+    .fitgap-language-option:hover,
+    .fitgap-language-option:focus,
+    .fitgap-language-option.is-active {
+        background: #F4F7FF;
+    }
+
+    .fitgap-language-check {
+        margin-left: auto;
+    }
+</style>
+
+<nav class="fitgap-language-selector" aria-label="{{ text.select_language }}">
+    <button
+        type="button"
+        class="btn fitgap-language-button d-inline-flex align-items-center gap-2"
+        aria-label="{{ text.select_language }}"
+        aria-expanded="false"
+        aria-controls="fitgap-language-menu"
+        data-language-selector-trigger
+    >
+        <span aria-hidden="true">🌐</span>
+        <span>{{ current_language_option.label }}</span>
+        <span aria-hidden="true">▾</span>
+    </button>
+    <div id="fitgap-language-menu" class="fitgap-language-menu" role="menu" data-language-selector-menu>
+        {% for option in language_options %}
+            {% if language_selector_method == 'post' %}
+                <form method="post" action="{{ option.url }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="output_language" value="{{ option.code }}">
+                    <input type="hidden" name="analysis_payload" value="{{ language_selector_payload }}">
+                    <button
+                        type="submit"
+                        class="fitgap-language-option{% if option.active %} is-active fw-semibold{% endif %}"
+                        role="menuitem"
+                        {% if option.active %}aria-current="true"{% endif %}
+                    >
+                        <span aria-hidden="true">{{ option.flag }}</span>
+                        <span>{{ option.label }}</span>
+                        {% if option.active %}<span class="fitgap-language-check" aria-label="Current language">✓</span>{% endif %}
+                    </button>
+                </form>
+            {% else %}
+                <a
+                    href="{{ option.url }}"
+                    class="fitgap-language-option{% if option.active %} is-active fw-semibold{% endif %}"
+                    role="menuitem"
+                    {% if option.active %}aria-current="true"{% endif %}
+                >
+                    <span aria-hidden="true">{{ option.flag }}</span>
+                    <span>{{ option.label }}</span>
+                    {% if option.active %}<span class="fitgap-language-check" aria-label="Current language">✓</span>{% endif %}
+                </a>
+            {% endif %}
+        {% endfor %}
+    </div>
+</nav>
+
+<script>
+    (() => {
+        const trigger = document.querySelector('[data-language-selector-trigger]');
+        const menu = document.querySelector('[data-language-selector-menu]');
+
+        if (!trigger || !menu) {
+            return;
+        }
+
+        const closeMenu = () => {
+            menu.classList.remove('is-open');
+            trigger.setAttribute('aria-expanded', 'false');
+        };
+
+        trigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const shouldOpen = !menu.classList.contains('is-open');
+            closeMenu();
+            if (shouldOpen) {
+                menu.classList.add('is-open');
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        });
+
+        menu.addEventListener('click', (event) => event.stopPropagation());
+        document.addEventListener('click', closeMenu);
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeMenu();
+                trigger.focus();
+            }
+        });
+    })();
+</script>

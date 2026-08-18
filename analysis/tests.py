@@ -39,6 +39,7 @@ from .services import (
     extract_skills,
     generate_learning_recommendations,
 )
+from .translations import SUPPORTED_LANGUAGE_OPTIONS
 
 
 def _uploaded_file(name, content, content_type='application/octet-stream'):
@@ -1273,6 +1274,18 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'aria-controls="fitgap-account-drawer"')
         self.assertContains(response, 'aria-expanded="false"')
 
+    def _assert_language_selector(self, response, current_label='English', aria_label='Select language'):
+        self.assertContains(response, 'data-language-selector-trigger')
+        self.assertContains(response, 'aria-expanded="false"')
+        self.assertContains(response, f'aria-label="{aria_label}"')
+        self.assertContains(response, f'<span>{current_label}</span>', html=True)
+        self.assertContains(response, '🇬🇧')
+        self.assertContains(response, '🇨🇳')
+        self.assertContains(response, 'class="fitgap-language-option is-active fw-semibold"')
+        self.assertContains(response, '✓')
+        self.assertNotContains(response, 'Language:')
+        self.assertNotContains(response, '语言：')
+
     def _assert_guest_drawer(self, response):
         self._assert_account_menu_trigger(response)
         self.assertContains(response, 'Browsing as Guest')
@@ -1701,8 +1714,7 @@ class InterfaceLanguageTests(TestCase):
             '<strong class="fitgap-blue-emphasis fw-bold" style="color: #1D63ED;">build the right skills faster to move closer to the job you want.</strong>',
             html=True,
         )
-        self.assertContains(response, 'Language:')
-        self.assertContains(response, '<strong aria-current="page" class="text-dark">English</strong>', html=True)
+        self._assert_language_selector(response)
         self._assert_guest_drawer(response)
         self.assertContains(
             response,
@@ -1755,8 +1767,7 @@ class InterfaceLanguageTests(TestCase):
             '<strong class="fitgap-blue-emphasis fw-bold" style="color: #1D63ED;">更高效地补齐关键技能，向理想岗位更进一步。</strong>',
             html=True,
         )
-        self.assertContains(response, '语言：')
-        self.assertContains(response, '<strong aria-current="page" class="text-dark">简体中文</strong>', html=True)
+        self._assert_language_selector(response, current_label='简体中文', aria_label='选择语言')
         self.assertContains(
             response,
             '<h3 class="workflow-step-heading fw-bold mb-3">第一步 · 上传或粘贴你的简历</h3>',
@@ -1783,6 +1794,63 @@ class InterfaceLanguageTests(TestCase):
         self.assertNotContains(response, '查看原型结果')
         self.assertContains(response, 'href="/analyse/?lang=en"')
 
+    def test_language_selector_renders_on_landing_and_analyse_pages(self):
+        landing_response = self.client.get('/?lang=en')
+        input_response = self.client.get('/analyse/?lang=zh')
+
+        self._assert_language_selector(landing_response)
+        self._assert_language_selector(input_response, current_label='简体中文', aria_label='选择语言')
+
+    def test_language_selector_dropdown_contains_only_supported_languages(self):
+        response = self.client.get('/?lang=en')
+
+        self.assertContains(response, '🇬🇧')
+        self.assertContains(response, '🇨🇳')
+        self.assertContains(response, 'English')
+        self.assertContains(response, '简体中文')
+        self.assertEqual([item['code'] for item in SUPPORTED_LANGUAGE_OPTIONS], ['en', 'zh'])
+        self.assertNotContains(response, 'Spanish')
+        self.assertNotContains(response, 'Japanese')
+        self.assertNotContains(response, 'French')
+
+    def test_language_selector_uses_reusable_partial_in_all_header_templates(self):
+        templates = [
+            'landing.html',
+            'input.html',
+            'results.html',
+            'ai_results.html',
+            'learning_roadmap.html',
+            'account_entry.html',
+            'account_login.html',
+            'account_register.html',
+            'history.html',
+            'history_detail.html',
+            'history_delete.html',
+        ]
+
+        for template_name in templates:
+            template_source = Path(f'analysis/templates/analysis/{template_name}').read_text()
+            self.assertIn("{% include 'analysis/partials/language_selector.html' %}", template_source)
+
+        partial_source = Path('analysis/templates/analysis/partials/language_selector.html').read_text()
+        self.assertIn('data-language-selector-trigger', partial_source)
+        self.assertIn('SUPPORTED_LANGUAGE_OPTIONS', Path('analysis/translations.py').read_text())
+
+    def test_language_selector_preserves_authenticated_session(self):
+        self._login_user()
+
+        response = self.client.get('/account/?lang=zh')
+
+        self.assertContains(response, 'student@example.com')
+        self._assert_language_selector(response, current_label='简体中文', aria_label='选择语言')
+
+    def test_language_selector_preserves_roadmap_intent_on_login_and_register(self):
+        login_response = self.client.get('/account/login/?lang=en&intent=roadmap')
+        register_response = self.client.get('/account/register/?lang=zh&intent=roadmap')
+
+        self.assertContains(login_response, 'href="/account/login/?lang=zh&amp;intent=roadmap"', html=False)
+        self.assertContains(register_response, 'href="/account/register/?lang=en&amp;intent=roadmap"', html=False)
+
     def test_fitgap_brand_logo_renders_from_static_asset(self):
         response = self.client.get('/analyse/?lang=en')
 
@@ -1798,6 +1866,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'alt="FitGap - AI Skill-Gap Analysis"')
         self.assertContains(response, 'aria-label="FitGap"')
         self._assert_guest_drawer(response)
+        self._assert_language_selector(response)
         self.assertContains(response, 'action="/results/full-analysis/?lang=en"')
         self.assertContains(response, 'action="/results/full-analysis/?lang=zh"')
         self.assertContains(response, 'name="analysis_payload"')
@@ -1814,6 +1883,7 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'alt="FitGap - AI Skill-Gap Analysis"')
         self.assertContains(response, 'aria-label="FitGap"')
         self._assert_guest_drawer(response)
+        self._assert_language_selector(response)
         self.assertContains(response, 'action="/results/ai-results/?lang=en"')
         self.assertContains(response, 'action="/results/ai-results/?lang=zh"')
         self.assertContains(response, 'name="analysis_payload"')
@@ -2892,12 +2962,15 @@ class InterfaceLanguageTests(TestCase):
         detail_response = self.client.get(f'/account/analyses/{record.id}/?lang=zh')
         delete_response = self.client.get(f'/account/analyses/{record.id}/delete/?lang=zh')
 
-        self.assertContains(list_response, '打开')
+        self._assert_language_selector(list_response, current_label='简体中文', aria_label='选择语言')
         self.assertContains(list_response, '重命名')
         self.assertContains(list_response, '删除')
+        self.assertContains(list_response, '更多操作')
         self.assertContains(detail_response, '重命名分析')
+        self._assert_language_selector(detail_response, current_label='简体中文', aria_label='选择语言')
         self.assertContains(detail_response, '这次分析尚未生成 AI 优先级建议。')
         self.assertContains(delete_response, '删除这条分析记录？')
+        self._assert_language_selector(delete_response, current_label='简体中文', aria_label='选择语言')
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
@@ -2962,6 +3035,9 @@ class InterfaceLanguageTests(TestCase):
         mock_roadmap.assert_called_once()
         self.assertTemplateUsed(response, 'analysis/learning_roadmap.html')
         self.assertContains(response, 'My AI Learning Roadmap')
+        self._assert_language_selector(response)
+        self.assertContains(response, 'action="/results/learning-roadmap/?lang=en"')
+        self.assertContains(response, 'action="/results/learning-roadmap/?lang=zh"')
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')

@@ -16,20 +16,7 @@
                     <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
                 </a>
             </div>
-            <nav class="small" aria-label="Language selection">
-                <span class="text-muted me-2">{{ text.language_switch_label }}</span>
-                {% if language == 'en' %}
-                    <strong aria-current="page" class="text-dark">English</strong>
-                {% else %}
-                    <a href="{% url 'analysis:landing' %}?lang=en">English</a>
-                {% endif %}
-                <span class="text-muted mx-2">|</span>
-                {% if language == 'zh' %}
-                    <strong aria-current="page" class="text-dark">简体中文</strong>
-                {% else %}
-                    <a href="{% url 'analysis:landing' %}?lang=zh">简体中文</a>
-                {% endif %}
-            </nav>
+            {% include 'analysis/partials/language_selector.html' %}
         </header>
 
         {% if messages %}

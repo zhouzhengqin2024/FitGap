@@ -3,6 +3,19 @@ SUPPORTED_LANGUAGES = {
     'zh': '简体中文',
 }
 
+SUPPORTED_LANGUAGE_OPTIONS = [
+    {
+        'code': 'en',
+        'label': 'English',
+        'flag': '🇬🇧',
+    },
+    {
+        'code': 'zh',
+        'label': '简体中文',
+        'flag': '🇨🇳',
+    },
+]
+
 DEFAULT_LANGUAGE = 'en'
 
 TRANSLATIONS = {
@@ -11,6 +24,7 @@ TRANSLATIONS = {
         'input_page_title': 'CV and Job Description Input',
         'input_intro': 'Paste or upload the source text you want FitGap to use for analysis.',
         'language_switch_label': 'Language:',
+        'select_language': 'Select language',
         'hero_product_label': 'AI Career Skill-Gap Assistant',
         'hero_headline': 'See Your Skill Gaps in Just Three Steps. Know What to Do Next.',
         'hero_supporting_text': (
@@ -298,6 +312,7 @@ TRANSLATIONS = {
         'input_page_title': '简历和职位描述输入',
         'input_intro': '上传或粘贴要让 FitGap 用于分析的原始文本。',
         'language_switch_label': '语言：',
+        'select_language': '选择语言',
         'hero_product_label': 'AI 求职技能差距助手',
         'hero_headline': '看清技能差距，仅需三步，知道下一步怎么做。',
         'hero_supporting_text': '不知道自己离目标岗位还有多远，也不知道下一步该学什么？上传简历和职位描述，快速识别技能差距、核实判断依据，',

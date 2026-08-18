@@ -66,10 +66,7 @@
                     <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
                 </a>
             </div>
-            <nav class="small d-flex gap-3 align-items-center" aria-label="Language selection">
-                <a href="{% url 'analysis:analysis_history' %}?lang=en" class="{% if language == 'en' %}fw-bold text-dark{% endif %}"{% if language == 'en' %} aria-current="page"{% endif %}>English</a>
-                <a href="{% url 'analysis:analysis_history' %}?lang=zh" class="{% if language == 'zh' %}fw-bold text-dark{% endif %}"{% if language == 'zh' %} aria-current="page"{% endif %}>简体中文</a>
-            </nav>
+            {% include 'analysis/partials/language_selector.html' %}
         </header>
 
         <div class="row justify-content-center">

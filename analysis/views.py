@@ -20,6 +20,7 @@ from .services import (
     generate_learning_recommendations,
 )
 from .translations import get_translations, normalise_language
+from .translations import SUPPORTED_LANGUAGE_OPTIONS
 
 PENDING_ROADMAP_CONTINUITY_KEY = 'pending_roadmap_continuity'
 CURRENT_ANALYSIS_RECORD_KEY = 'current_analysis_record_id'
@@ -68,6 +69,29 @@ def _get_extraction_error_message(text, code):
 
 def _sign_results(results):
     return signing.dumps(results, compress=True)
+
+
+def _language_selector_context(language, url_builder, method='get', payload=''):
+    options = []
+
+    for option in SUPPORTED_LANGUAGE_OPTIONS:
+        item = option.copy()
+        item['url'] = url_builder(option['code'])
+        item['active'] = option['code'] == language
+        options.append(item)
+
+    current_option = next(option for option in options if option['active'])
+    return {
+        'current_language_option': current_option,
+        'language_options': options,
+        'language_selector_method': method,
+        'language_selector_payload': payload,
+    }
+
+
+def _with_language_selector(context, language, url_builder, method='get', payload=''):
+    context.update(_language_selector_context(language, url_builder, method=method, payload=payload))
+    return context
 
 
 def _default_target_role(language):
@@ -264,46 +288,67 @@ def _apply_language_labels(results, language, text):
 
 def _render_results(request, language, results, text):
     results = _apply_language_labels(results, language, text)
+    payload = _sign_results(results)
 
     return render(
         request,
         'analysis/results.html',
-        {
-            'analysis_payload': _sign_results(results),
+        _with_language_selector(
+            {
+            'analysis_payload': payload,
             'language': language,
             'results': results,
             'text': text,
-        },
+            },
+            language,
+            lambda code: f'/results/full-analysis/?lang={code}',
+            method='post',
+            payload=payload,
+        ),
     )
 
 
 def _render_ai_results(request, language, results, text):
     results = _apply_language_labels(results, language, text)
+    payload = _sign_results(results)
 
     return render(
         request,
         'analysis/ai_results.html',
-        {
-            'analysis_payload': _sign_results(results),
+        _with_language_selector(
+            {
+            'analysis_payload': payload,
             'language': language,
             'results': results,
             'text': text,
-        },
+            },
+            language,
+            lambda code: f'/results/ai-results/?lang={code}',
+            method='post',
+            payload=payload,
+        ),
     )
 
 
 def _render_learning_roadmap(request, language, results, text):
     results = _apply_language_labels(results, language, text)
+    payload = _sign_results(results)
 
     return render(
         request,
         'analysis/learning_roadmap.html',
-        {
-            'analysis_payload': _sign_results(results),
+        _with_language_selector(
+            {
+            'analysis_payload': payload,
             'language': language,
             'results': results,
             'text': text,
-        },
+            },
+            language,
+            lambda code: f'/results/learning-roadmap/?lang={code}',
+            method='post',
+            payload=payload,
+        ),
     )
 
 
@@ -421,10 +466,10 @@ def landing_view(request):
     return render(
         request,
         'analysis/landing.html',
-        {
+        _with_language_selector({
             'language': language,
             'text': text,
-        },
+        }, language, lambda code: f'/?lang={code}'),
     )
 
 
@@ -446,11 +491,11 @@ def account_entry_view(request):
     return render(
         request,
         'analysis/account_entry.html',
-        {
+        _with_language_selector({
             'language': language,
             'roadmap_intent': roadmap_intent,
             'text': text,
-        },
+        }, language, lambda code: _account_url(code, roadmap_intent)),
     )
 
 
@@ -476,13 +521,13 @@ def account_login_view(request):
     return render(
         request,
         'analysis/account_login.html',
-        {
+        _with_language_selector({
             'language': language,
             'login_form': login_form,
             'register_url': _account_register_url(language, roadmap_intent),
             'roadmap_intent': roadmap_intent,
             'text': text,
-        },
+        }, language, lambda code: _account_login_url(code, roadmap_intent)),
     )
 
 
@@ -509,13 +554,13 @@ def account_register_view(request):
     return render(
         request,
         'analysis/account_register.html',
-        {
+        _with_language_selector({
             'language': language,
             'login_url': _account_login_url(language, roadmap_intent),
             'registration_form': registration_form,
             'roadmap_intent': roadmap_intent,
             'text': text,
-        },
+        }, language, lambda code: _account_register_url(code, roadmap_intent)),
     )
 
 
@@ -552,11 +597,11 @@ def analysis_history_view(request):
     return render(
         request,
         'analysis/history.html',
-        {
+        _with_language_selector({
             'language': language,
             'record_items': record_items,
             'text': text,
-        },
+        }, language, lambda code: f'/account/analyses/?lang={code}'),
     )
 
 
@@ -572,11 +617,11 @@ def analysis_history_detail_view(request, record_id):
     return render(
         request,
         'analysis/history_detail.html',
-        {
+        _with_language_selector({
             'language': language,
             'item': _saved_record_context(record, language, text),
             'text': text,
-        },
+        }, language, lambda code: f'/account/analyses/{record.id}/?lang={code}'),
     )
 
 
@@ -600,11 +645,11 @@ def analysis_history_rename_view(request, record_id):
     return render(
         request,
         'analysis/history_detail.html',
-        {
+        _with_language_selector({
             'language': language,
             'item': _saved_record_context(record, language, text, rename_form=form),
             'text': text,
-        },
+        }, language, lambda code: f'/account/analyses/{record.id}/?lang={code}'),
         status=400,
     )
 
@@ -628,11 +673,11 @@ def analysis_history_delete_view(request, record_id):
     return render(
         request,
         'analysis/history_delete.html',
-        {
+        _with_language_selector({
             'language': language,
             'item': _history_record_item(record, language, text),
             'text': text,
-        },
+        }, language, lambda code: f'/account/analyses/{record.id}/delete/?lang={code}'),
     )
 
 
@@ -711,11 +756,11 @@ def input_view(request):
     return render(
         request,
         'analysis/input.html',
-        {
+        _with_language_selector({
             'form': form,
             'language': language,
             'text': text,
-        },
+        }, language, lambda code: f'/analyse/?lang={code}'),
     )
 
 
