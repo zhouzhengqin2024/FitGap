@@ -1,0 +1,183 @@
+{% load static %}
+<!doctype html>
+<html lang="{{ text.html_lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ item.title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <main class="container py-4 py-md-5">
+        <header class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center justify-content-between gap-3 mb-5 mx-auto" style="max-width: 1120px;">
+            <div class="d-inline-flex align-items-center gap-3">
+                {% include 'analysis/partials/account_drawer.html' %}
+                <a class="d-inline-flex align-items-center" href="{% url 'analysis:input' %}?lang={{ language }}" aria-label="FitGap">
+                    <img src="{% static 'analysis/fitgap-logo.svg' %}" alt="FitGap - AI Skill-Gap Analysis" class="img-fluid" style="width: clamp(180px, 48vw, 315px);">
+                </a>
+            </div>
+            <nav class="small d-flex gap-3 align-items-center" aria-label="Language selection">
+                <a href="{% url 'analysis:analysis_history_detail' item.record.id %}?lang=en" class="{% if language == 'en' %}fw-bold text-dark{% endif %}"{% if language == 'en' %} aria-current="page"{% endif %}>English</a>
+                <a href="{% url 'analysis:analysis_history_detail' item.record.id %}?lang=zh" class="{% if language == 'zh' %}fw-bold text-dark{% endif %}"{% if language == 'zh' %} aria-current="page"{% endif %}>简体中文</a>
+            </nav>
+        </header>
+
+        <div class="row justify-content-center">
+            <div class="col-12 col-lg-10 col-xl-8">
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-info" role="status">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+
+                <div class="p-4 bg-white border rounded-3 mb-4">
+                    <div class="d-flex flex-column flex-md-row align-items-start justify-content-between gap-3">
+                        <div>
+                            <p class="text-uppercase small fw-bold text-muted mb-1">{{ text.saved_analysis_label }}</p>
+                            <h1 class="h2 fw-bold mb-2" style="color: #1D63ED;">{{ item.title }}</h1>
+                            {% if item.target_role %}
+                                <p class="text-muted mb-1">{{ text.target_role_label }} {{ item.target_role }}</p>
+                            {% endif %}
+                            <p class="text-muted mb-0">{{ text.saved_created_label }} {{ item.record.created_at|date:"Y-m-d H:i" }}</p>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <span class="badge text-bg-primary">{{ item.status_label }}</span>
+                            <span class="badge text-bg-light border text-dark">{{ item.language_label }}</span>
+                        </div>
+                    </div>
+                    <form id="rename-analysis" method="post" action="{% url 'analysis:analysis_history_rename' item.record.id %}?lang={{ language }}" class="mt-4">
+                        {% csrf_token %}
+                        <h2 class="h5">{{ text.rename_analysis_heading }}</h2>
+                        <label for="{{ item.rename_form.display_name.id_for_label }}" class="form-label">{{ text.analysis_name_label }}</label>
+                        <div class="d-flex flex-column flex-sm-row gap-2">
+                            {{ item.rename_form.display_name }}
+                            <button type="submit" class="btn btn-outline-primary">{{ text.history_save_name }}</button>
+                        </div>
+                        {% if item.rename_form.display_name.errors %}
+                            <div class="text-danger small mt-2">{{ item.rename_form.display_name.errors|join:", " }}</div>
+                        {% endif %}
+                    </form>
+                    <div class="d-flex flex-wrap gap-2 mt-3">
+                        <a href="{% url 'analysis:analysis_history' %}?lang={{ language }}" class="btn btn-outline-secondary">{{ text.back_to_my_analyses }}</a>
+                        <a href="{% url 'analysis:analysis_history_delete' item.record.id %}?lang={{ language }}" class="btn btn-outline-danger">{{ text.history_delete }}</a>
+                    </div>
+                </div>
+
+                <section class="mb-4 p-4 bg-white border rounded-3">
+                    <h2 class="h4">{{ text.saved_analysis_section }}</h2>
+                    {% if item.analysis_snapshot %}
+                        <p class="text-muted">{{ item.analysis_snapshot.match_score_explanation }}</p>
+                        <div class="progress mb-3" role="progressbar" aria-label="{{ text.match_score }}" aria-valuenow="{{ item.analysis_snapshot.match_score }}" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar" style="width: {{ item.analysis_snapshot.match_score }}%;">{{ item.analysis_snapshot.match_score }}%</div>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-12 col-md-6">
+                                <h3 class="h6">{{ text.matched_skills }}</h3>
+                                {% if item.analysis_snapshot.matched_skills %}
+                                    <ul class="mb-0">
+                                        {% for skill in item.analysis_snapshot.matched_skills %}
+                                            <li>{{ skill }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <p class="text-muted mb-0">{{ text.no_matched_skills }}</p>
+                                {% endif %}
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <h3 class="h6">{{ text.missing_skills }}</h3>
+                                {% if item.analysis_snapshot.missing_skills %}
+                                    <ul class="mb-0">
+                                        {% for skill in item.analysis_snapshot.missing_skills %}
+                                            <li>{{ skill }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <p class="text-muted mb-0">{{ text.no_missing_skills }}</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% if item.analysis_snapshot.matched_skill_details or item.analysis_snapshot.missing_skill_details %}
+                            <details class="mt-3">
+                                <summary class="fw-semibold" style="color: #1D63ED;">{{ text.evidence }}</summary>
+                                {% for skill_detail in item.analysis_snapshot.matched_skill_details %}
+                                    <div class="border-top pt-3 mt-3">
+                                        <h3 class="h6">{{ skill_detail.skill }} · {{ text.matched }}</h3>
+                                        <p class="mb-2">{{ skill_detail.explanation }}</p>
+                                    </div>
+                                {% endfor %}
+                                {% for skill_detail in item.analysis_snapshot.missing_skill_details %}
+                                    <div class="border-top pt-3 mt-3">
+                                        <h3 class="h6">{{ skill_detail.skill }} · {{ text.missing }}</h3>
+                                        <p class="mb-2">{{ skill_detail.explanation }}</p>
+                                    </div>
+                                {% endfor %}
+                            </details>
+                        {% endif %}
+                    {% else %}
+                        <p class="text-muted mb-0">{{ text.saved_analysis_unavailable }}</p>
+                    {% endif %}
+                </section>
+
+                <section class="mb-4 p-4 bg-white border rounded-3">
+                    <h2 class="h4">{{ text.saved_priorities_section }}</h2>
+                    {% if item.priority_snapshot.status == 'success' and item.priority_snapshot.priorities %}
+                        <div class="list-group">
+                            {% for priority in item.priority_snapshot.priorities %}
+                                <article class="list-group-item">
+                                    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                                        <h3 class="h6 fw-bold mb-0">{{ priority.skill }}</h3>
+                                        <span class="badge text-bg-primary">{{ priority.priority_label }}</span>
+                                    </div>
+                                    <p class="mb-0 mt-2">{{ priority.reason }}</p>
+                                </article>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted mb-0">{{ text.saved_priorities_unavailable }}</p>
+                    {% endif %}
+                </section>
+
+                <section class="mb-4 p-4 bg-white border rounded-3">
+                    <h2 class="h4">{{ text.saved_roadmap_section }}</h2>
+                    {% if item.roadmap_snapshot.skills %}
+                        {% if item.roadmap_snapshot.summary %}
+                            <div class="p-3 mb-4 rounded-3 border" style="background-color: #F4F8FF;">
+                                <div class="text-uppercase small fw-bold text-muted">{{ text.roadmap_immediate_next_action }}</div>
+                                <h3 class="h5 fw-bold mb-2" style="color: #1D63ED;">{{ item.roadmap_snapshot.summary.immediate_next_action.skill }}</h3>
+                                <p class="mb-2"><strong>{{ text.roadmap_action }}:</strong> {{ item.roadmap_snapshot.summary.immediate_next_action.action }}</p>
+                                <p class="mb-0"><strong>{{ text.roadmap_done_when }}:</strong> {{ item.roadmap_snapshot.summary.immediate_next_action.completion_criteria }}</p>
+                            </div>
+                        {% endif %}
+                        {% for skill in item.roadmap_snapshot.skills %}
+                            <article class="border-top pt-3 mt-3">
+                                <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                                    <h3 class="h5 fw-bold mb-0">{{ skill.skill }}</h3>
+                                    <span class="d-flex flex-wrap gap-2">
+                                        <span class="badge text-bg-primary">{{ skill.priority_label }}</span>
+                                        <span class="badge text-bg-secondary">{{ skill.stage_label }}</span>
+                                        <span class="badge text-bg-light border text-dark">{{ skill.estimated_hours }}</span>
+                                    </span>
+                                </div>
+                                <p class="mb-2 mt-2"><strong>{{ text.roadmap_target_outcome }}:</strong> {{ skill.target_outcome }}</p>
+                                <p class="mb-2"><strong>{{ text.roadmap_evidence_target }}:</strong> {{ skill.evidence_target }}</p>
+                                <p class="mb-2"><strong>{{ text.roadmap_verification_standard }}:</strong> {{ skill.verification_standard }}</p>
+                                <ol class="mb-0 ps-3">
+                                    {% for step in skill.core_steps %}
+                                        <li class="mb-2">
+                                            <strong>{{ step.title }}</strong>
+                                            <span class="text-muted">({{ step.estimated_hours }})</span><br>
+                                            {{ step.action }}
+                                        </li>
+                                    {% endfor %}
+                                </ol>
+                            </article>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted mb-0">{{ text.saved_roadmap_unavailable }}</p>
+                    {% endif %}
+                </section>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

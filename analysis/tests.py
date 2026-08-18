@@ -1836,7 +1836,10 @@ class InterfaceLanguageTests(TestCase):
         migration_files = sorted(Path('analysis/migrations').glob('*.py'))
         model_source = Path('analysis/models.py').read_text()
 
-        self.assertEqual([path.name for path in migration_files], ['0001_initial.py', '__init__.py'])
+        self.assertEqual(
+            [path.name for path in migration_files],
+            ['0001_initial.py', '0002_analysisrecord_display_name.py', '__init__.py'],
+        )
         self.assertIn('class AnalysisRecord', model_source)
         self.assertNotIn('SavedRoadmap', model_source)
         self.assertNotIn('SkillProgress', model_source)
@@ -2508,6 +2511,393 @@ class InterfaceLanguageTests(TestCase):
         model_names = {model.__name__ for model in AnalysisRecord._meta.apps.get_app_config('analysis').get_models()}
 
         self.assertEqual(model_names, {'AnalysisRecord'})
+
+    def test_analysis_record_has_optional_display_name(self):
+        field = AnalysisRecord._meta.get_field('display_name')
+
+        self.assertEqual(field.max_length, 160)
+        self.assertTrue(field.blank)
+
+    def test_existing_record_without_display_name_still_uses_target_role(self):
+        user = self._create_user()
+        AnalysisRecord.objects.create(user=user, target_role='Backend Developer')
+        self.client.login(username='student@example.com', password='StrongPass123!')
+        response = self.client.get('/account/analyses/?lang=en')
+
+        self.assertContains(response, 'Backend Developer')
+
+    def test_default_title_uses_current_language_when_target_role_is_system_fallback(self):
+        user = self._create_user()
+        AnalysisRecord.objects.create(user=user, target_role='未命名分析')
+        AnalysisRecord.objects.create(user=user, target_role='Untitled Analysis')
+        self.client.login(username='student@example.com', password='StrongPass123!')
+
+        english_response = self.client.get('/account/analyses/?lang=en')
+        chinese_response = self.client.get('/account/analyses/?lang=zh')
+
+        self.assertContains(english_response, 'Untitled Analysis', count=2)
+        self.assertNotContains(english_response, '未命名分析')
+        self.assertContains(chinese_response, '未命名分析', count=2)
+
+    def test_switching_history_language_changes_only_default_fallback_title(self):
+        user = self._create_user()
+        AnalysisRecord.objects.create(user=user, target_role='Untitled Analysis')
+        self.client.login(username='student@example.com', password='StrongPass123!')
+
+        english_response = self.client.get('/account/analyses/?lang=en')
+        chinese_response = self.client.get('/account/analyses/?lang=zh')
+
+        self.assertContains(english_response, 'Untitled Analysis')
+        self.assertContains(chinese_response, '未命名分析')
+
+    def test_user_defined_display_name_is_never_translated(self):
+        user = self._create_user()
+        AnalysisRecord.objects.create(user=user, target_role='Untitled Analysis', display_name='Shanghai AI PM')
+        self.client.login(username='student@example.com', password='StrongPass123!')
+
+        english_response = self.client.get('/account/analyses/?lang=en')
+        chinese_response = self.client.get('/account/analyses/?lang=zh')
+
+        self.assertContains(english_response, 'Shanghai AI PM')
+        self.assertContains(chinese_response, 'Shanghai AI PM')
+        self.assertNotContains(chinese_response, '未命名分析')
+
+    def test_meaningful_target_role_is_not_automatically_translated(self):
+        user = self._create_user()
+        AnalysisRecord.objects.create(user=user, target_role='Junior Data Analyst')
+        self.client.login(username='student@example.com', password='StrongPass123!')
+
+        response = self.client.get('/account/analyses/?lang=zh')
+
+        self.assertContains(response, 'Junior Data Analyst')
+        self.assertNotContains(response, '初级数据分析师')
+
+    def test_status_values_remain_canonical_and_render_in_current_language(self):
+        user = self._create_user()
+        record = AnalysisRecord.objects.create(user=user, status=AnalysisRecord.STATUS_PRIORITIES_COMPLETED)
+        self.client.login(username='student@example.com', password='StrongPass123!')
+
+        english_response = self.client.get('/account/analyses/?lang=en')
+        chinese_response = self.client.get('/account/analyses/?lang=zh')
+        record.refresh_from_db()
+
+        self.assertEqual(record.status, 'priorities_completed')
+        self.assertContains(english_response, 'AI priorities completed')
+        self.assertContains(chinese_response, 'AI 优先级已完成')
+
+    def test_history_language_metadata_is_human_readable(self):
+        user = self._create_user()
+        AnalysisRecord.objects.create(user=user, language='zh')
+        self.client.login(username='student@example.com', password='StrongPass123!')
+
+        english_response = self.client.get('/account/analyses/?lang=en')
+        chinese_response = self.client.get('/account/analyses/?lang=zh')
+
+        self.assertContains(english_response, 'Chinese')
+        self.assertNotContains(english_response, '>ZH<', html=False)
+        self.assertContains(chinese_response, '中文')
+
+    def test_history_list_shows_management_actions(self):
+        self._login_user()
+        record = AnalysisRecord.objects.create(user=get_user_model().objects.get(email='student@example.com'), target_role='Backend Role')
+        response = self.client.get('/account/analyses/?lang=en')
+
+        self.assertContains(response, 'data-history-menu-button')
+        self.assertContains(response, 'aria-label="More actions"')
+        self.assertContains(response, 'Rename')
+        self.assertContains(response, 'Delete')
+        self.assertContains(response, f'/account/analyses/{record.id}/?lang=en')
+        self.assertContains(response, f'/account/analyses/{record.id}/delete/?lang=en')
+        self.assertNotContains(response, f'action="/account/analyses/{record.id}/rename/?lang=en"')
+        self.assertNotContains(response, 'name="display_name"')
+        self.assertNotContains(response, 'btn-outline-danger')
+        self.assertNotContains(response, 'Share')
+        self.assertNotContains(response, 'Archive')
+        self.assertNotContains(response, 'Pin')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_history_list_triggers_zero_gemini_calls(self, mock_prioritise, mock_roadmap):
+        self._login_user()
+        AnalysisRecord.objects.create(user=get_user_model().objects.get(email='student@example.com'))
+
+        self.client.get('/account/analyses/?lang=en')
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+
+    def test_owner_can_open_saved_record_detail(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            target_role='Backend Developer',
+            analysis_snapshot={
+                'match_score': 50,
+                'match_score_explanation': '1 of 2 recognised job-description skills were found in the CV.',
+                'matched_skills': ['Python'],
+                'missing_skills': ['Django'],
+            },
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=en')
+
+        self.assertTemplateUsed(response, 'analysis/history_detail.html')
+        self.assertContains(response, 'Backend Developer')
+        self.assertContains(response, 'Saved Analysis')
+        self.assertContains(response, '50%')
+        self.assertContains(response, 'Python')
+        self.assertContains(response, 'Django')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_history_detail_uses_database_snapshot_only(self, mock_prioritise, mock_roadmap):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            priority_snapshot={
+                'status': 'success',
+                'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Saved English priority.'}],
+            },
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=en')
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertContains(response, 'Saved English priority.')
+        self.assertContains(response, 'HIGH PRIORITY')
+
+    def test_user_b_cannot_open_user_a_record(self):
+        user_a = self._create_user(email='a@example.com')
+        self._create_user(email='b@example.com')
+        record = AnalysisRecord.objects.create(user=user_a, target_role='Private A')
+        self.client.login(username='b@example.com', password='StrongPass123!')
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=en')
+
+        self.assertEqual(response.status_code, 404)
+        self.assertNotContains(response, 'Private A', status_code=404)
+
+    def test_analysis_only_record_shows_missing_priority_and_roadmap_messages(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            status=AnalysisRecord.STATUS_ANALYSIS_COMPLETED,
+            analysis_snapshot={'match_score': 0, 'matched_skills': [], 'missing_skills': ['Django']},
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=en')
+
+        self.assertContains(response, 'AI priorities were not generated for this analysis.')
+        self.assertContains(response, 'A learning roadmap was not generated for this analysis.')
+
+    def test_priorities_completed_record_shows_missing_roadmap_message(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            status=AnalysisRecord.STATUS_PRIORITIES_COMPLETED,
+            priority_snapshot={
+                'status': 'success',
+                'priorities': [{'skill': 'REST APIs', 'priority': 'medium', 'reason': 'Saved reason.'}],
+            },
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=en')
+
+        self.assertContains(response, 'Saved reason.')
+        self.assertContains(response, 'A learning roadmap was not generated for this analysis.')
+
+    def test_roadmap_completed_record_displays_saved_roadmap(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            status=AnalysisRecord.STATUS_ROADMAP_COMPLETED,
+            roadmap_snapshot=_sample_roadmap(['Django']),
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=en')
+
+        self.assertContains(response, 'Saved Learning Roadmap')
+        self.assertContains(response, 'Create one observable Django feature today.')
+        self.assertContains(response, 'Django mini project with Git history and README')
+
+    def test_detail_language_switch_preserves_same_record_without_retranslating_saved_ai_text(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            priority_snapshot={
+                'status': 'success',
+                'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Saved English priority only.'}],
+            },
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=zh')
+
+        self.assertContains(response, '已保存的 AI 优先级建议')
+        self.assertContains(response, 'Saved English priority only.')
+        self.assertContains(response, f'href="/account/analyses/{record.id}/?lang=en"')
+
+    def test_owner_can_rename_display_name_only(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        snapshot = {'matched_skills': ['Python']}
+        record = AnalysisRecord.objects.create(user=user, target_role='Original Target', analysis_snapshot=snapshot)
+        response = self.client.post(f'/account/analyses/{record.id}/rename/?lang=en', data={
+            'display_name': '  MSc Backend Plan  ',
+        })
+        record.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'/account/analyses/{record.id}/?lang=en')
+        self.assertEqual(record.display_name, 'MSc Backend Plan')
+        self.assertEqual(record.target_role, 'Original Target')
+        self.assertEqual(record.analysis_snapshot, snapshot)
+
+    def test_empty_and_overlong_rename_are_rejected(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, target_role='Original Target')
+
+        empty_response = self.client.post(f'/account/analyses/{record.id}/rename/?lang=en', data={'display_name': '   '})
+        long_response = self.client.post(f'/account/analyses/{record.id}/rename/?lang=en', data={'display_name': 'x' * 161})
+        record.refresh_from_db()
+
+        self.assertEqual(empty_response.status_code, 400)
+        self.assertContains(empty_response, 'Please enter an analysis name.', status_code=400)
+        self.assertEqual(long_response.status_code, 400)
+        self.assertContains(long_response, 'Analysis name must be 160 characters or fewer.', status_code=400)
+        self.assertEqual(record.display_name, '')
+
+    def test_user_b_cannot_rename_user_a_record(self):
+        user_a = self._create_user(email='a@example.com')
+        self._create_user(email='b@example.com')
+        record = AnalysisRecord.objects.create(user=user_a, target_role='Private A')
+        self.client.login(username='b@example.com', password='StrongPass123!')
+        response = self.client.post(f'/account/analyses/{record.id}/rename/?lang=en', data={'display_name': 'Hacked'})
+        record.refresh_from_db()
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(record.display_name, '')
+
+    def test_rename_requires_post_and_csrf(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user)
+
+        get_response = self.client.get(f'/account/analyses/{record.id}/rename/?lang=en')
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.login(username='student@example.com', password='StrongPass123!')
+        csrf_response = csrf_client.post(f'/account/analyses/{record.id}/rename/?lang=en', data={'display_name': 'Name'})
+
+        self.assertEqual(get_response.status_code, 405)
+        self.assertEqual(csrf_response.status_code, 403)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_rename_triggers_zero_gemini_calls(self, mock_prioritise, mock_roadmap):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user)
+
+        self.client.post(f'/account/analyses/{record.id}/rename/?lang=en', data={'display_name': 'Saved Plan'})
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+
+    def test_delete_confirmation_get_does_not_delete_record(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, target_role='Delete Candidate')
+        response = self.client.get(f'/account/analyses/{record.id}/delete/?lang=en')
+
+        self.assertTemplateUsed(response, 'analysis/history_delete.html')
+        self.assertContains(response, 'Delete this analysis?')
+        self.assertEqual(AnalysisRecord.objects.count(), 1)
+
+    def test_owner_can_delete_own_record_without_deleting_user_or_other_records(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, target_role='Delete Me')
+        other_record = AnalysisRecord.objects.create(user=user, target_role='Keep Me')
+        response = self.client.post(f'/account/analyses/{record.id}/delete/?lang=en')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], '/account/analyses/?lang=en')
+        self.assertFalse(AnalysisRecord.objects.filter(id=record.id).exists())
+        self.assertTrue(AnalysisRecord.objects.filter(id=other_record.id).exists())
+        self.assertTrue(get_user_model().objects.filter(email='student@example.com').exists())
+
+    def test_user_b_cannot_delete_user_a_record(self):
+        user_a = self._create_user(email='a@example.com')
+        self._create_user(email='b@example.com')
+        record = AnalysisRecord.objects.create(user=user_a, target_role='Private A')
+        self.client.login(username='b@example.com', password='StrongPass123!')
+        response = self.client.post(f'/account/analyses/{record.id}/delete/?lang=en')
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(AnalysisRecord.objects.filter(id=record.id).exists())
+
+    def test_delete_actual_action_requires_post_and_csrf(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user)
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.login(username='student@example.com', password='StrongPass123!')
+        csrf_response = csrf_client.post(f'/account/analyses/{record.id}/delete/?lang=en')
+
+        self.assertEqual(csrf_response.status_code, 403)
+        self.assertTrue(AnalysisRecord.objects.filter(id=record.id).exists())
+
+    def test_deleting_active_record_clears_current_analysis_pointer(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user)
+        session = self.client.session
+        session['current_analysis_record_id'] = record.id
+        session.save()
+
+        self.client.post(f'/account/analyses/{record.id}/delete/?lang=en')
+
+        self.assertNotIn('current_analysis_record_id', self.client.session)
+
+    def test_deleting_inactive_record_keeps_unrelated_active_pointer(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        active_record = AnalysisRecord.objects.create(user=user)
+        inactive_record = AnalysisRecord.objects.create(user=user)
+        session = self.client.session
+        session['current_analysis_record_id'] = active_record.id
+        session.save()
+
+        self.client.post(f'/account/analyses/{inactive_record.id}/delete/?lang=en')
+
+        self.assertEqual(self.client.session['current_analysis_record_id'], active_record.id)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_delete_triggers_zero_gemini_calls(self, mock_prioritise, mock_roadmap):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user)
+
+        self.client.post(f'/account/analyses/{record.id}/delete/?lang=en')
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+
+    def test_chinese_history_management_ui_renders(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, target_role='未命名分析')
+        list_response = self.client.get('/account/analyses/?lang=zh')
+        detail_response = self.client.get(f'/account/analyses/{record.id}/?lang=zh')
+        delete_response = self.client.get(f'/account/analyses/{record.id}/delete/?lang=zh')
+
+        self.assertContains(list_response, '打开')
+        self.assertContains(list_response, '重命名')
+        self.assertContains(list_response, '删除')
+        self.assertContains(detail_response, '重命名分析')
+        self.assertContains(detail_response, '这次分析尚未生成 AI 优先级建议。')
+        self.assertContains(delete_response, '删除这条分析记录？')
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')

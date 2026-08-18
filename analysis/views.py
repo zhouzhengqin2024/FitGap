@@ -1,15 +1,17 @@
+import copy
+
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.core import signing
 from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import AnalysisRecord
 from .ai_learning_roadmap import LearningRoadmapUnavailable, generate_learning_roadmap
 from .ai_prioritisation import AIPrioritisationUnavailable, prioritise_skill_gaps
 from .document_extraction import DocumentExtractionError, extract_document_text
-from .forms import AccountLoginForm, AccountRegistrationForm, AnalysisInputForm
+from .forms import AccountLoginForm, AccountRegistrationForm, AnalysisInputForm, AnalysisRenameForm
 from .services import (
     build_skill_evidence_details,
     calculate_match_score,
@@ -72,6 +74,27 @@ def _default_target_role(language):
     return '未命名分析' if language == 'zh' else 'Untitled Analysis'
 
 
+def _is_system_fallback_title(value):
+    return value.strip() in {'', 'Untitled Analysis', '未命名分析'}
+
+
+def _meaningful_target_role(record):
+    target_role = (record.target_role or '').strip()
+    return '' if _is_system_fallback_title(target_role) else target_role
+
+
+def _record_display_title(record, language):
+    display_name = (record.display_name or '').strip()
+    if display_name:
+        return display_name
+
+    target_role = _meaningful_target_role(record)
+    if target_role:
+        return target_role
+
+    return _default_target_role(language)
+
+
 def _clear_current_analysis_record(request):
     request.session.pop(CURRENT_ANALYSIS_RECORD_KEY, None)
 
@@ -88,6 +111,10 @@ def _get_current_analysis_record(request):
     if record is None:
         _clear_current_analysis_record(request)
     return record
+
+
+def _get_owned_analysis_record_or_404(request, record_id):
+    return get_object_or_404(AnalysisRecord, id=record_id, user=request.user)
 
 
 def _get_or_create_current_analysis_record(request, language):
@@ -164,6 +191,51 @@ def _persist_roadmap_snapshot(request, language, results):
     _advance_record_status(record, AnalysisRecord.STATUS_ROADMAP_COMPLETED)
     record.save()
     return record
+
+
+def _history_record_item(record, language, text):
+    status_labels = {
+        AnalysisRecord.STATUS_STARTED: text['analysis_status_started'],
+        AnalysisRecord.STATUS_ANALYSIS_COMPLETED: text['analysis_status_analysis_completed'],
+        AnalysisRecord.STATUS_PRIORITIES_COMPLETED: text['analysis_status_priorities_completed'],
+        AnalysisRecord.STATUS_ROADMAP_COMPLETED: text['analysis_status_roadmap_completed'],
+    }
+    return {
+        'record': record,
+        'title': _record_display_title(record, language),
+        'target_role': _meaningful_target_role(record),
+        'status_label': status_labels.get(record.status, record.status),
+        'language_label': text[f"analysis_language_{record.language}"],
+        'rename_form': AnalysisRenameForm(
+            initial={'display_name': record.display_name or record.target_role},
+            language=language,
+        ),
+    }
+
+
+def _saved_record_context(record, language, text, rename_form=None):
+    analysis_snapshot = copy.deepcopy(record.analysis_snapshot or {})
+    priority_snapshot = copy.deepcopy(record.priority_snapshot or {})
+    roadmap_snapshot = copy.deepcopy(record.roadmap_snapshot or {})
+
+    if priority_snapshot.get('status') == 'success':
+        _add_ai_priority_labels(priority_snapshot.get('priorities', []), text)
+    _add_roadmap_labels(roadmap_snapshot, text)
+
+    return {
+        'record': record,
+        'title': _record_display_title(record, language),
+        'target_role': _meaningful_target_role(record),
+        'status_label': _history_record_item(record, language, text)['status_label'],
+        'language_label': text[f"analysis_language_{record.language}"],
+        'analysis_snapshot': analysis_snapshot,
+        'priority_snapshot': priority_snapshot,
+        'roadmap_snapshot': roadmap_snapshot,
+        'rename_form': rename_form or AnalysisRenameForm(
+            initial={'display_name': record.display_name or record.target_role},
+            language=language,
+        ),
+    }
 
 
 def _apply_language_labels(results, language, text):
@@ -472,17 +544,8 @@ def analysis_history_view(request):
     if not request.user.is_authenticated:
         return redirect(_account_login_url(language))
 
-    status_labels = {
-        AnalysisRecord.STATUS_STARTED: text['analysis_status_started'],
-        AnalysisRecord.STATUS_ANALYSIS_COMPLETED: text['analysis_status_analysis_completed'],
-        AnalysisRecord.STATUS_PRIORITIES_COMPLETED: text['analysis_status_priorities_completed'],
-        AnalysisRecord.STATUS_ROADMAP_COMPLETED: text['analysis_status_roadmap_completed'],
-    }
     record_items = [
-        {
-            'record': record,
-            'status_label': status_labels.get(record.status, record.status),
-        }
+        _history_record_item(record, language, text)
         for record in AnalysisRecord.objects.filter(user=request.user).order_by('-created_at', '-id')
     ]
 
@@ -492,6 +555,82 @@ def analysis_history_view(request):
         {
             'language': language,
             'record_items': record_items,
+            'text': text,
+        },
+    )
+
+
+def analysis_history_detail_view(request, record_id):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    if not request.user.is_authenticated:
+        return redirect(_account_login_url(language))
+
+    record = _get_owned_analysis_record_or_404(request, record_id)
+
+    return render(
+        request,
+        'analysis/history_detail.html',
+        {
+            'language': language,
+            'item': _saved_record_context(record, language, text),
+            'text': text,
+        },
+    )
+
+
+@require_POST
+def analysis_history_rename_view(request, record_id):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    if not request.user.is_authenticated:
+        return redirect(_account_login_url(language))
+
+    record = _get_owned_analysis_record_or_404(request, record_id)
+    form = AnalysisRenameForm(request.POST, language=language)
+
+    if form.is_valid():
+        record.display_name = form.cleaned_data['display_name']
+        record.save(update_fields=['display_name', 'updated_at'])
+        messages.success(request, text['analysis_renamed'])
+        return redirect(f'/account/analyses/{record.id}/?lang={language}')
+
+    return render(
+        request,
+        'analysis/history_detail.html',
+        {
+            'language': language,
+            'item': _saved_record_context(record, language, text, rename_form=form),
+            'text': text,
+        },
+        status=400,
+    )
+
+
+def analysis_history_delete_view(request, record_id):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    if not request.user.is_authenticated:
+        return redirect(_account_login_url(language))
+
+    record = _get_owned_analysis_record_or_404(request, record_id)
+
+    if request.method == 'POST':
+        if request.session.get(CURRENT_ANALYSIS_RECORD_KEY) == record.id:
+            _clear_current_analysis_record(request)
+        record.delete()
+        messages.success(request, text['analysis_deleted'])
+        return redirect(f'/account/analyses/?lang={language}')
+
+    return render(
+        request,
+        'analysis/history_delete.html',
+        {
+            'language': language,
+            'item': _history_record_item(record, language, text),
             'text': text,
         },
     )

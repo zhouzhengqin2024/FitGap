@@ -196,3 +196,28 @@ class AccountLoginForm(forms.Form):
                 raise forms.ValidationError(self.text['account_invalid_credentials'])
 
         return cleaned_data
+
+
+class AnalysisRenameForm(forms.Form):
+    display_name = forms.CharField(max_length=160)
+
+    def __init__(self, *args, language=AnalysisInputForm.LANGUAGE_ENGLISH, **kwargs):
+        super().__init__(*args, **kwargs)
+        text = get_translations(language)
+        self.fields['display_name'].label = text['analysis_name_label']
+        self.fields['display_name'].error_messages['required'] = text['analysis_name_required']
+        self.fields['display_name'].error_messages['max_length'] = text['analysis_name_too_long']
+        self.fields['display_name'].widget.attrs.update({
+            'class': 'form-control',
+            'maxlength': '160',
+            'aria-label': text['analysis_name_label'],
+            'placeholder': text['analysis_name_label'],
+        })
+
+    def clean_display_name(self):
+        display_name = self.cleaned_data['display_name'].strip()
+
+        if not display_name:
+            raise forms.ValidationError(self.fields['display_name'].error_messages['required'])
+
+        return display_name

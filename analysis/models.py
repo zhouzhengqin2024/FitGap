@@ -25,6 +25,7 @@ class AnalysisRecord(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     language = models.CharField(max_length=2, choices=LANGUAGE_CHOICES, default='en')
     target_role = models.CharField(max_length=255, default='Untitled Analysis')
+    display_name = models.CharField(max_length=160, blank=True)
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_STARTED)
     analysis_snapshot = models.JSONField(default=dict, blank=True)
     priority_snapshot = models.JSONField(default=dict, blank=True)
