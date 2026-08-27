@@ -15,6 +15,8 @@ from django.urls import reverse
 from docx import Document
 from pypdf import PdfWriter
 
+from config import settings as project_settings
+
 from .document_extraction import DocumentExtractionError, extract_document_text
 from .ai_learning_roadmap import (
     LearningRoadmapUnavailable,
@@ -90,6 +92,43 @@ def _blank_pdf_bytes():
     writer.add_blank_page(width=72, height=72)
     writer.write(buffer)
     return buffer.getvalue()
+
+
+class ProductionSettingsTests(SimpleTestCase):
+    def test_environment_boolean_parsing(self):
+        with patch.dict(os.environ, {'TEST_BOOL': 'true'}):
+            self.assertTrue(project_settings._env_bool('TEST_BOOL'))
+
+        with patch.dict(os.environ, {'TEST_BOOL': '0'}):
+            self.assertFalse(project_settings._env_bool('TEST_BOOL', True))
+
+    def test_environment_list_parsing_discards_empty_items(self):
+        with patch.dict(os.environ, {'TEST_LIST': 'example.com, .up.railway.app,  '}):
+            self.assertEqual(project_settings._env_list('TEST_LIST'), ['example.com', '.up.railway.app'])
+
+    def test_environment_integer_parsing(self):
+        with patch.dict(os.environ, {'TEST_INT': '3600'}):
+            self.assertEqual(project_settings._env_int('TEST_INT'), 3600)
+
+    def test_local_database_defaults_to_sqlite_without_database_url(self):
+        with patch.dict(os.environ, {}, clear=True):
+            database_config = project_settings._database_config()
+
+        self.assertEqual(database_config['default']['ENGINE'], 'django.db.backends.sqlite3')
+        self.assertEqual(database_config['default']['NAME'], project_settings.BASE_DIR / 'db.sqlite3')
+
+    def test_database_url_configures_postgresql(self):
+        database_url = 'postgresql://fitgap_user:secret@example.railway.internal:5432/fitgap'
+        with patch.dict(os.environ, {'DATABASE_URL': database_url}):
+            database_config = project_settings._database_config()
+
+        self.assertEqual(database_config['default']['ENGINE'], 'django.db.backends.postgresql')
+        self.assertEqual(database_config['default']['NAME'], 'fitgap')
+        self.assertEqual(database_config['default']['USER'], 'fitgap_user')
+        self.assertEqual(database_config['default']['HOST'], 'example.railway.internal')
+        self.assertEqual(database_config['default']['PORT'], 5432)
+        self.assertEqual(database_config['default']['CONN_MAX_AGE'], 600)
+        self.assertTrue(database_config['default']['CONN_HEALTH_CHECKS'])
 
 
 def _sample_roadmap(skills=None):
