@@ -1,3 +1,4 @@
+import json
 import os
 from io import BytesIO
 from pathlib import Path
@@ -25,6 +26,7 @@ from .ai_learning_roadmap import (
 from .ai_prioritisation import (
     AIPrioritisationUnavailable,
     GEMINI_MODEL,
+    GEMINI_TIMEOUT_MS,
     build_ai_gap_input,
     prioritise_skill_gaps,
     validate_ai_priorities,
@@ -996,13 +998,64 @@ class AIPrioritisationServiceTests(SimpleTestCase):
             },
         ], 'en')
 
-        mock_genai.Client.assert_called_once_with(api_key='test-key')
+        mock_genai.Client.assert_called_once_with(
+            api_key='test-key',
+            http_options={'timeout': GEMINI_TIMEOUT_MS},
+        )
         call_kwargs = mock_client.models.generate_content.call_args.kwargs
         self.assertEqual(call_kwargs['model'], GEMINI_MODEL)
         self.assertEqual(call_kwargs['config']['response_mime_type'], 'application/json')
         self.assertIn('response_json_schema', call_kwargs['config'])
         self.assertIn('Django is required.', call_kwargs['contents'])
         self.assertEqual(result[0]['skill'], 'Django')
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.genai')
+    def test_ai_prioritisation_logs_success_with_elapsed_time(self, mock_genai):
+        class FakeResponse:
+            text = '{"priorities":[{"skill":"Django","priority":"high","reason":"Django is required."}]}'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.return_value = FakeResponse()
+
+        with self.assertLogs('analysis.ai_prioritisation', level='INFO') as logs:
+            priorities = prioritise_skill_gaps([
+                {
+                    'skill': 'Django',
+                    'cv_evidence': [],
+                    'jd_evidence': [{'excerpt': 'Django is required.'}],
+                },
+            ], 'en')
+
+        self.assertEqual(priorities[0]['skill'], 'Django')
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Gemini call #1 prioritisation succeeded: elapsed_ms=', logged_output)
+        self.assertIn('result_count=1', logged_output)
+        self.assertNotIn('Django is required.', logged_output)
+        self.assertNotIn('test-key', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.genai')
+    def test_ai_prioritisation_timeout_logs_safe_category(self, mock_genai):
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = TimeoutError('request timed out with test-key')
+
+        with self.assertLogs('analysis.ai_prioritisation', level='WARNING') as logs:
+            with self.assertRaises(AIPrioritisationUnavailable):
+                prioritise_skill_gaps([
+                    {
+                        'skill': 'Django',
+                        'cv_evidence': [],
+                        'jd_evidence': [{'excerpt': 'Django is required.'}],
+                    },
+                ], 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Gemini call #1 prioritisation failed: category=timeout', logged_output)
+        self.assertIn('exception=TimeoutError', logged_output)
+        self.assertIn('elapsed_ms=', logged_output)
+        self.assertNotIn('Django is required.', logged_output)
+        self.assertNotIn('test-key', logged_output)
 
 
 class LearningRoadmapServiceTests(SimpleTestCase):
@@ -1385,9 +1438,10 @@ class LearningRoadmapServiceTests(SimpleTestCase):
 
         logged_output = '\n'.join(logs.output)
         self.assertIn(
-            'Learning roadmap Gemini request failed: RuntimeError status=unknown code=unknown message="unavailable"',
+            'Gemini call #2 learning roadmap failed: category=api_exception exception=RuntimeError',
             logged_output,
         )
+        self.assertIn('status=unknown code=unknown message="unavailable"', logged_output)
         self.assertNotIn('private JD payload', logged_output)
         self.assertNotIn('test-key', logged_output)
 
@@ -1418,7 +1472,7 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }, 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Learning roadmap Gemini request failed: FakeClientError', logged_output)
+        self.assertIn('Gemini call #2 learning roadmap failed: category=api_exception exception=FakeClientError', logged_output)
         self.assertIn('status=400', logged_output)
         self.assertIn('code=INVALID_ARGUMENT', logged_output)
         self.assertIn('Invalid response_json_schema: unsupported field additionalProperties.', logged_output)
@@ -1484,6 +1538,68 @@ class LearningRoadmapServiceTests(SimpleTestCase):
         self.assertIn('[redacted-phone]', logged_output)
         self.assertNotIn('ada@example.com', logged_output)
         self.assertNotIn('+44 7700 900123', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.genai')
+    def test_learning_roadmap_uses_configured_timeout_and_logs_success(self, mock_genai):
+        class FakeResponse:
+            text = json.dumps(_sample_roadmap(['Django']))
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.return_value = FakeResponse()
+
+        with self.assertLogs('analysis.ai_learning_roadmap', level='INFO') as logs:
+            roadmap = generate_learning_roadmap({
+                'cv_skills': ['Python'],
+                'ai_prioritisation': {
+                    'status': 'success',
+                    'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                },
+                'missing_skill_details': [{
+                    'skill': 'Django',
+                    'jd_evidence': [{'excerpt': 'Django is required.'}],
+                    'cv_evidence': [],
+                }],
+            }, 'en')
+
+        mock_genai.Client.assert_called_once_with(
+            api_key='test-key',
+            http_options={'timeout': GEMINI_TIMEOUT_MS},
+        )
+        self.assertEqual(roadmap['skills'][0]['skill'], 'Django')
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Gemini call #2 learning roadmap succeeded: elapsed_ms=', logged_output)
+        self.assertIn('result_count=1', logged_output)
+        self.assertNotIn('Django is required.', logged_output)
+        self.assertNotIn('test-key', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.genai')
+    def test_learning_roadmap_timeout_logs_safe_category(self, mock_genai):
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = TimeoutError('request timed out with test-key')
+
+        with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+            with self.assertRaises(LearningRoadmapUnavailable):
+                generate_learning_roadmap({
+                    'cv_skills': ['Python'],
+                    'ai_prioritisation': {
+                        'status': 'success',
+                        'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+                    },
+                    'missing_skill_details': [{
+                        'skill': 'Django',
+                        'jd_evidence': [{'excerpt': 'Django is required.'}],
+                        'cv_evidence': [],
+                    }],
+                }, 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Gemini call #2 learning roadmap failed: category=timeout', logged_output)
+        self.assertIn('exception=TimeoutError', logged_output)
+        self.assertIn('elapsed_ms=', logged_output)
+        self.assertNotIn('Django is required.', logged_output)
+        self.assertNotIn('test-key', logged_output)
 
 
 class InterfaceLanguageTests(TestCase):
@@ -3469,6 +3585,24 @@ class InterfaceLanguageTests(TestCase):
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
+    def test_learning_roadmap_failure_preserves_priorities_and_does_not_corrupt_record(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        mock_roadmap.side_effect = LearningRoadmapUnavailable
+        self._login_user()
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        response = self._post_learning_roadmap(ai_response, 'en')
+        record = AnalysisRecord.objects.get()
+
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, '1 · Django')
+        self.assertEqual(record.status, AnalysisRecord.STATUS_PRIORITIES_COMPLETED)
+        self.assertEqual(record.priority_snapshot['priorities'][0]['skill'], 'Django')
+        self.assertEqual(record.roadmap_snapshot, {})
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
     def test_chinese_learning_roadmap_failure_message_renders(self, mock_prioritise, mock_roadmap):
         mock_prioritise.return_value = [
             {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是核心后端框架要求。'},
@@ -3605,6 +3739,28 @@ class InterfaceLanguageTests(TestCase):
         )
         self.assertContains(response, 'Matched Skills')
         self.assertContains(response, 'Missing Skills')
+
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_ai_prioritisation_failure_preserves_deterministic_results_and_saved_analysis(self, mock_prioritise):
+        self._login_user()
+        mock_prioritise.side_effect = AIPrioritisationUnavailable
+        results_response = self._results_response(
+            'en',
+            cv_text='Python SQL Git',
+            job_description_text='Python SQL Django',
+        )
+        response = self._post_ai_prioritisation(results_response, 'en')
+        record = AnalysisRecord.objects.get()
+
+        self.assertTemplateUsed(response, 'analysis/results.html')
+        self.assertContains(response, '67%')
+        self.assertContains(response, 'Matched Skills')
+        self.assertContains(response, 'Missing Skills')
+        self.assertContains(response, 'Evidence from Job Description')
+        self.assertEqual(record.status, AnalysisRecord.STATUS_ANALYSIS_COMPLETED)
+        self.assertEqual(record.analysis_snapshot['matched_skills'], ['Python', 'SQL'])
+        self.assertEqual(record.analysis_snapshot['missing_skills'], ['Django'])
+        self.assertEqual(record.priority_snapshot, {})
 
     @patch('analysis.views.prioritise_skill_gaps')
     def test_simulated_api_exception_triggers_chinese_fallback(self, mock_prioritise):

@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+import time
 
 try:
     from google import genai
@@ -8,8 +10,10 @@ except ImportError:  # pragma: no cover - exercised in environments without the 
 
 
 GEMINI_MODEL = 'gemini-3.6-flash'
+GEMINI_TIMEOUT_MS = 30000
 ALLOWED_PRIORITIES = {'high', 'medium', 'low'}
 MAX_AI_PRIORITIES = 3
+logger = logging.getLogger(__name__)
 
 PRIORITISATION_RESPONSE_SCHEMA = {
     'type': 'object',
@@ -36,6 +40,16 @@ PRIORITISATION_RESPONSE_SCHEMA = {
 
 class AIPrioritisationUnavailable(Exception):
     """Raised when AI prioritisation cannot safely produce validated output."""
+
+
+def _elapsed_ms(start_time):
+    return int((time.monotonic() - start_time) * 1000)
+
+
+def _exception_category(exc):
+    if isinstance(exc, TimeoutError) or 'timeout' in exc.__class__.__name__.lower():
+        return 'timeout'
+    return 'api_exception'
 
 
 def _normalise_skill(skill):
@@ -123,15 +137,20 @@ def prioritise_skill_gaps(missing_skill_details, language='en'):
     if not missing_skill_details:
         return []
 
+    start_time = time.monotonic()
     api_key = os.environ.get('GEMINI_API_KEY')
 
     if not api_key or genai is None:
+        logger.warning(
+            'Gemini call #1 prioritisation failed: category=configuration elapsed_ms=%s',
+            _elapsed_ms(start_time),
+        )
         raise AIPrioritisationUnavailable
 
     selected_language = 'Simplified Chinese' if language == 'zh' else 'English'
     gap_input = build_ai_gap_input(missing_skill_details)
     verified_missing_skills = [item['skill'] for item in missing_skill_details]
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, http_options={'timeout': GEMINI_TIMEOUT_MS})
 
     try:
         response = client.models.generate_content(
@@ -153,11 +172,36 @@ def prioritise_skill_gaps(missing_skill_details, language='en'):
             },
         )
     except Exception as exc:
+        logger.warning(
+            'Gemini call #1 prioritisation failed: category=%s exception=%s elapsed_ms=%s',
+            _exception_category(exc),
+            exc.__class__.__name__,
+            _elapsed_ms(start_time),
+        )
         raise AIPrioritisationUnavailable from exc
 
     try:
         response_data = json.loads(_extract_response_text(response))
     except (TypeError, ValueError) as exc:
+        logger.warning(
+            'Gemini call #1 prioritisation failed: category=json_parsing exception=%s elapsed_ms=%s',
+            exc.__class__.__name__,
+            _elapsed_ms(start_time),
+        )
         raise AIPrioritisationUnavailable from exc
 
-    return validate_ai_priorities(response_data, verified_missing_skills)
+    try:
+        priorities = validate_ai_priorities(response_data, verified_missing_skills)
+    except AIPrioritisationUnavailable:
+        logger.warning(
+            'Gemini call #1 prioritisation failed: category=validation elapsed_ms=%s',
+            _elapsed_ms(start_time),
+        )
+        raise
+
+    logger.info(
+        'Gemini call #1 prioritisation succeeded: elapsed_ms=%s result_count=%s',
+        _elapsed_ms(start_time),
+        len(priorities),
+    )
+    return priorities

@@ -2,8 +2,9 @@ import json
 import logging
 import os
 import re
+import time
 
-from .ai_prioritisation import ALLOWED_PRIORITIES, GEMINI_MODEL
+from .ai_prioritisation import ALLOWED_PRIORITIES, GEMINI_MODEL, GEMINI_TIMEOUT_MS
 
 try:
     from google import genai
@@ -225,6 +226,16 @@ def _safe_api_error_metadata(exc, roadmap_input):
     return metadata
 
 
+def _elapsed_ms(start_time):
+    return int((time.monotonic() - start_time) * 1000)
+
+
+def _exception_category(exc):
+    if isinstance(exc, TimeoutError) or 'timeout' in exc.__class__.__name__.lower():
+        return 'timeout'
+    return 'api_exception'
+
+
 def build_learning_roadmap_input(results):
     """Build privacy-minimised structured data for roadmap generation."""
     missing_details = {
@@ -429,6 +440,7 @@ def _extract_response_text(response):
 
 def generate_learning_roadmap(results, language='en'):
     """Use Gemini to generate a validated roadmap for existing priority gaps."""
+    start_time = time.monotonic()
     roadmap_input = build_learning_roadmap_input(results)
 
     if not roadmap_input['priority_gaps']:
@@ -437,12 +449,16 @@ def generate_learning_roadmap(results, language='en'):
     api_key = os.environ.get('GEMINI_API_KEY')
 
     if not api_key or genai is None:
+        logger.warning(
+            'Gemini call #2 learning roadmap failed: category=configuration elapsed_ms=%s',
+            _elapsed_ms(start_time),
+        )
         logger.warning('Learning roadmap unavailable: missing API key or Gemini SDK unavailable')
         raise _fail('missing API key or Gemini SDK unavailable')
 
     selected_language = 'Simplified Chinese' if language == 'zh' else 'English'
     verified_priority_skills = [item['skill'] for item in roadmap_input['priority_gaps']]
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, http_options={'timeout': GEMINI_TIMEOUT_MS})
 
     try:
         response = client.models.generate_content(
@@ -493,8 +509,11 @@ def generate_learning_roadmap(results, language='en'):
     except Exception as exc:
         metadata = _safe_api_error_metadata(exc, roadmap_input)
         logger.warning(
-            'Learning roadmap Gemini request failed: %s status=%s code=%s message="%s"',
+            'Gemini call #2 learning roadmap failed: category=%s exception=%s elapsed_ms=%s '
+            'status=%s code=%s message="%s"',
+            _exception_category(exc),
             exc.__class__.__name__,
+            _elapsed_ms(start_time),
             metadata.get('status') or 'unknown',
             metadata.get('code') or 'unknown',
             metadata.get('message') or 'unavailable',
@@ -504,11 +523,27 @@ def generate_learning_roadmap(results, language='en'):
     try:
         response_data = json.loads(_extract_response_text(response))
     except (TypeError, ValueError) as exc:
+        logger.warning(
+            'Gemini call #2 learning roadmap failed: category=json_parsing exception=%s elapsed_ms=%s',
+            exc.__class__.__name__,
+            _elapsed_ms(start_time),
+        )
         logger.warning('Learning roadmap JSON parsing failed: %s', exc.__class__.__name__)
         raise _fail('JSON parsing failed') from exc
 
     try:
-        return validate_learning_roadmap(response_data, verified_priority_skills)
+        roadmap = validate_learning_roadmap(response_data, verified_priority_skills)
     except LearningRoadmapUnavailable as exc:
+        logger.warning(
+            'Gemini call #2 learning roadmap failed: category=validation elapsed_ms=%s',
+            _elapsed_ms(start_time),
+        )
         logger.warning('Learning roadmap validation failed: %s', exc)
         raise
+
+    logger.info(
+        'Gemini call #2 learning roadmap succeeded: elapsed_ms=%s result_count=%s',
+        _elapsed_ms(start_time),
+        len(roadmap.get('skills', [])),
+    )
+    return roadmap
