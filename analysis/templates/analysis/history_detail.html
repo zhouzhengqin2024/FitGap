@@ -55,6 +55,7 @@
                         {% endif %}
                     </form>
                     <div class="d-flex flex-wrap gap-2 mt-3">
+                        <a href="{% url 'analysis:analysis_history_pdf' item.record.id %}?lang={{ language }}" class="btn btn-primary">{{ text.download_pdf }}</a>
                         <a href="{% url 'analysis:analysis_history' %}?lang={{ language }}" class="btn btn-outline-secondary">{{ text.back_to_my_analyses }}</a>
                         <a href="{% url 'analysis:analysis_history_delete' item.record.id %}?lang={{ language }}" class="btn btn-outline-danger">{{ text.history_delete }}</a>
                     </div>

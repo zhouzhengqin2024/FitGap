@@ -10,7 +10,7 @@ except ImportError:  # pragma: no cover - exercised in environments without the 
 
 
 GEMINI_MODEL = 'gemini-3.6-flash'
-GEMINI_TIMEOUT_MS = 30000
+GEMINI_TIMEOUT_MS = 45000
 ALLOWED_PRIORITIES = {'high', 'medium', 'low'}
 MAX_AI_PRIORITIES = 3
 logger = logging.getLogger(__name__)

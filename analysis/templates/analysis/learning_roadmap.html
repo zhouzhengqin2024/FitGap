@@ -25,6 +25,12 @@
                     <h1 id="roadmap-heading" class="display-5 fw-bold mb-3" style="color: #1D63ED;">{{ text.roadmap_page_title }}</h1>
                     <p class="lead text-secondary">{{ text.roadmap_intro }}</p>
                     <p class="fw-semibold" style="color: #1D63ED;">{{ text.roadmap_value }}</p>
+                    {% if export_record %}
+                        <div class="mt-4">
+                            <a href="{% url 'analysis:analysis_history_pdf' export_record.id %}?lang={{ language }}" class="btn btn-primary btn-lg">{{ text.download_pdf }}</a>
+                            <p class="small text-muted mt-2 mb-0">{{ text.pdf_history_hint }}</p>
+                        </div>
+                    {% endif %}
                 </section>
 
                 <section class="mb-4 p-4 rounded-3 bg-white border">

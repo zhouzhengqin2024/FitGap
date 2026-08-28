@@ -13,7 +13,7 @@ from django.test import SimpleTestCase, TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
 from docx import Document
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 
 from config import settings as project_settings
 
@@ -960,6 +960,9 @@ class SkillEvidenceTests(SimpleTestCase):
 
 
 class AIPrioritisationServiceTests(SimpleTestCase):
+    def test_shared_gemini_timeout_is_45_seconds(self):
+        self.assertEqual(GEMINI_TIMEOUT_MS, 45000)
+
     def test_build_ai_gap_input_uses_verified_missing_skill_evidence_only(self):
         gap_input = build_ai_gap_input([
             {
@@ -3147,6 +3150,108 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'Python')
         self.assertContains(response, 'Django')
 
+    def test_history_detail_renders_english_pdf_download_button(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, target_role='Backend Developer')
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=en')
+
+        self.assertContains(response, 'Download PDF')
+        self.assertContains(response, f'href="/account/analyses/{record.id}/download-pdf/?lang=en"')
+
+    def test_history_detail_renders_chinese_pdf_download_button(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, target_role='后端开发')
+        response = self.client.get(f'/account/analyses/{record.id}/?lang=zh')
+
+        self.assertContains(response, '下载 PDF')
+        self.assertContains(response, f'href="/account/analyses/{record.id}/download-pdf/?lang=zh"')
+
+    def test_unauthenticated_user_cannot_export_pdf(self):
+        user = self._create_user()
+        record = AnalysisRecord.objects.create(user=user, target_role='Private Analysis')
+        response = self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], '/account/login/?lang=en')
+
+    def test_authenticated_owner_can_export_pdf(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            target_role='Backend Developer',
+            analysis_snapshot={
+                'match_score': 50,
+                'match_score_explanation': '1 of 2 recognised job-description skills were found in the CV.',
+                'matched_skills': ['Python'],
+                'missing_skills': ['Django'],
+                'matched_skill_details': [{
+                    'skill': 'Python',
+                    'cv_evidence': [{'excerpt': 'Built tools with Python.'}],
+                    'jd_evidence': [{'excerpt': 'The role requires Python.'}],
+                }],
+                'missing_skill_details': [{
+                    'skill': 'Django',
+                    'cv_evidence': [],
+                    'jd_evidence': [{'excerpt': 'Django experience is required.'}],
+                }],
+            },
+            priority_snapshot={
+                'status': 'success',
+                'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Django is a verified gap.'}],
+            },
+            roadmap_snapshot=_sample_roadmap(['Django']),
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertEqual(response['Content-Disposition'], f'attachment; filename="fitgap-report-{record.id}.pdf"')
+        self.assertTrue(response.content.startswith(b'%PDF'))
+        self.assertGreaterEqual(len(PdfReader(BytesIO(response.content)).pages), 1)
+
+    def test_user_b_cannot_export_user_a_pdf(self):
+        user_a = self._create_user(email='a@example.com')
+        self._create_user(email='b@example.com')
+        record = AnalysisRecord.objects.create(user=user_a, target_role='Private A')
+        self.client.login(username='b@example.com', password='StrongPass123!')
+        response = self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_incomplete_analysis_record_pdf_does_not_crash(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, language='zh')
+        response = self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=zh')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.content.startswith(b'%PDF'))
+        self.assertIn(b'STSong-Light', response.content)
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_pdf_export_triggers_zero_gemini_calls(self, mock_prioritise, mock_roadmap):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, target_role='Saved Export')
+
+        self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
+
+        mock_prioritise.assert_not_called()
+        mock_roadmap.assert_not_called()
+
+    def test_pdf_export_does_not_create_analysis_record(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(user=user, target_role='Stable Export')
+
+        self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
+
+        self.assertEqual(AnalysisRecord.objects.count(), 1)
+
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')
     def test_history_detail_uses_database_snapshot_only(self, mock_prioritise, mock_roadmap):
@@ -3533,6 +3638,38 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'CV usage guidance')
         self.assertContains(response, 'future Django project evidence')
         self.assertContains(response, 'src="/static/analysis/fitgap-logo.svg"')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_final_roadmap_page_has_pdf_download_for_current_saved_record(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django is explicitly required.'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django'])
+        ai_response = self._post_ai_prioritisation(self._results_response('en'), 'en')
+        self._login_user()
+        response = self._post_learning_roadmap(ai_response, 'en')
+        record = AnalysisRecord.objects.get()
+
+        self.assertContains(response, 'Download PDF')
+        self.assertContains(response, 'You can also manage and re-download saved reports from History.')
+        self.assertContains(response, f'href="/account/analyses/{record.id}/download-pdf/?lang=en"')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_chinese_final_roadmap_page_has_pdf_download_for_current_saved_record(self, mock_prioritise, mock_roadmap):
+        mock_prioritise.return_value = [
+            {'skill': 'Django', 'priority': 'high', 'reason': 'Django 是核心后端框架要求。'},
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Django'])
+        ai_response = self._post_ai_prioritisation(self._results_response('zh'), 'zh')
+        self._login_user()
+        response = self._post_learning_roadmap(ai_response, 'zh')
+        record = AnalysisRecord.objects.get()
+
+        self.assertContains(response, '下载 PDF')
+        self.assertContains(response, '你也可以在历史记录中管理并再次下载报告。')
+        self.assertContains(response, f'href="/account/analyses/{record.id}/download-pdf/?lang=zh"')
 
     @patch('analysis.views.generate_learning_roadmap')
     @patch('analysis.views.prioritise_skill_gaps')

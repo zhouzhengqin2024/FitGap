@@ -3,7 +3,7 @@ import copy
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.core import signing
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
@@ -12,6 +12,7 @@ from .ai_learning_roadmap import LearningRoadmapUnavailable, generate_learning_r
 from .ai_prioritisation import AIPrioritisationUnavailable, prioritise_skill_gaps
 from .document_extraction import DocumentExtractionError, extract_document_text
 from .forms import AccountLoginForm, AccountRegistrationForm, AnalysisInputForm, AnalysisRenameForm
+from .pdf_export import build_analysis_record_pdf
 from .services import (
     build_skill_evidence_details,
     calculate_match_score,
@@ -340,6 +341,7 @@ def _render_learning_roadmap(request, language, results, text):
         _with_language_selector(
             {
             'analysis_payload': payload,
+            'export_record': _get_current_analysis_record(request),
             'language': language,
             'results': results,
             'text': text,
@@ -623,6 +625,20 @@ def analysis_history_detail_view(request, record_id):
             'text': text,
         }, language, lambda code: f'/account/analyses/{record.id}/?lang={code}'),
     )
+
+
+def analysis_history_pdf_view(request, record_id):
+    language = _get_selected_language(request)
+    text = get_translations(language)
+
+    if not request.user.is_authenticated:
+        return redirect(_account_login_url(language))
+
+    record = _get_owned_analysis_record_or_404(request, record_id)
+    pdf_content = build_analysis_record_pdf(record, text)
+    response = HttpResponse(pdf_content, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="fitgap-report-{record.id}.pdf"'
+    return response
 
 
 @require_POST

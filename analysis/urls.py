@@ -10,6 +10,7 @@ urlpatterns = [
     path('account/', views.account_entry_view, name='account_entry'),
     path('account/analyses/', views.analysis_history_view, name='analysis_history'),
     path('account/analyses/<int:record_id>/', views.analysis_history_detail_view, name='analysis_history_detail'),
+    path('account/analyses/<int:record_id>/download-pdf/', views.analysis_history_pdf_view, name='analysis_history_pdf'),
     path('account/analyses/<int:record_id>/rename/', views.analysis_history_rename_view, name='analysis_history_rename'),
     path('account/analyses/<int:record_id>/delete/', views.analysis_history_delete_view, name='analysis_history_delete'),
     path('account/login/', views.account_login_view, name='account_login'),
