@@ -239,6 +239,18 @@ def build_analysis_record_pdf(record, text, exported_at=None):
     analysis_snapshot = record.analysis_snapshot or {}
     priority_snapshot = record.priority_snapshot or {}
     roadmap_snapshot = record.roadmap_snapshot or {}
+    analysis_mode = analysis_snapshot.get('analysis_mode', 'structured')
+    match_score_available = analysis_snapshot.get('match_score_available', True)
+    analysis_mode_label = (
+        text['analysis_mode_low_coverage_ai']
+        if analysis_mode == 'low_coverage_ai'
+        else text['analysis_mode_structured']
+    )
+    match_score_value = (
+        f"{analysis_snapshot.get('match_score', 0)}%"
+        if match_score_available
+        else text['match_score_unavailable']
+    )
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -258,7 +270,13 @@ def build_analysis_record_pdf(record, text, exported_at=None):
         _paragraph(report_subtitle, styles['subtitle']),
         _paragraph(f"{text['pdf_exported_label']} {timezone.localtime(exported_at).strftime('%Y-%m-%d %H:%M')}", styles['body']),
         _paragraph(f"{text['target_role_label']} {target_role or text['pdf_section_unavailable']}", styles['body']),
-        _paragraph(f"{text['match_score']}: {analysis_snapshot.get('match_score', 0)}%", styles['body']),
+        _paragraph(f"{text['analysis_mode_label']} {analysis_mode_label}", styles['body']),
+        _paragraph(
+            f"{text['match_score']}: {match_score_value}"
+            if match_score_available
+            else text['match_score_unavailable_display'],
+            styles['body'],
+        ),
     ]
 
     _section(story, text['pdf_skill_gap_summary'], styles)

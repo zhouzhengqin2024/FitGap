@@ -30,8 +30,10 @@ from .ai_prioritisation import (
     GEMINI_MODEL,
     GEMINI_TIMEOUT_MS,
     build_ai_gap_input,
+    prioritise_low_coverage_analysis,
     prioritise_skill_gaps,
     validate_ai_priorities,
+    validate_low_coverage_priorities,
 )
 from .models import AnalysisRecord
 from .services import (
@@ -1018,6 +1020,36 @@ class AIPrioritisationServiceTests(SimpleTestCase):
         with self.assertRaises(AIPrioritisationUnavailable):
             validate_ai_priorities({'items': []}, ['Django'])
 
+    def test_validate_low_coverage_priorities_accepts_candidate_priorities(self):
+        priorities = validate_low_coverage_priorities({
+            'priorities': [
+                {'skill': 'Conservation planning', 'priority': 'High', 'reason': 'Important for the target role.'},
+            ],
+        })
+
+        self.assertEqual(priorities, [{
+            'skill': 'Conservation planning',
+            'priority': 'high',
+            'reason': 'Important for the target role.',
+        }])
+
+    def test_validate_low_coverage_priorities_rejects_invalid_priority(self):
+        with self.assertRaises(AIPrioritisationUnavailable):
+            validate_low_coverage_priorities({
+                'priorities': [
+                    {'skill': 'Conservation planning', 'priority': 'urgent', 'reason': 'Invalid.'},
+                ],
+            })
+
+    def test_validate_low_coverage_priorities_rejects_duplicates(self):
+        with self.assertRaises(AIPrioritisationUnavailable):
+            validate_low_coverage_priorities({
+                'priorities': [
+                    {'skill': 'Conservation planning', 'priority': 'high', 'reason': 'First.'},
+                    {'skill': 'conservation planning', 'priority': 'medium', 'reason': 'Duplicate.'},
+                ],
+            })
+
     @patch.dict(os.environ, {}, clear=True)
     def test_missing_gemini_api_key_triggers_fallback_exception(self):
         with self.assertRaises(AIPrioritisationUnavailable):
@@ -1050,6 +1082,33 @@ class AIPrioritisationServiceTests(SimpleTestCase):
         self.assertIn('response_json_schema', call_kwargs['config'])
         self.assertIn('Django is required.', call_kwargs['contents'])
         self.assertEqual(result[0]['skill'], 'Django')
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.genai')
+    def test_low_coverage_prioritisation_receives_cv_and_job_description(self, mock_genai):
+        class FakeResponse:
+            text = '{"priorities":[{"skill":"Conservation planning","priority":"high","reason":"The JD emphasises planning experience."}]}'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.return_value = FakeResponse()
+
+        result = prioritise_low_coverage_analysis(
+            'Museum assistant with public engagement experience.',
+            'The role involves conservation planning and archive coordination.',
+            'en',
+        )
+
+        mock_genai.Client.assert_called_once_with(
+            api_key='test-key',
+            http_options={'timeout': GEMINI_TIMEOUT_MS},
+        )
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        self.assertEqual(call_kwargs['model'], GEMINI_MODEL)
+        self.assertIn('low_coverage_ai', call_kwargs['contents'])
+        self.assertIn('Museum assistant with public engagement experience.', call_kwargs['contents'])
+        self.assertIn('conservation planning and archive coordination', call_kwargs['contents'])
+        self.assertIn('not deterministic missing skills', call_kwargs['contents'])
+        self.assertEqual(result[0]['skill'], 'Conservation planning')
 
     @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
     @patch('analysis.ai_prioritisation.genai')
@@ -1151,6 +1210,7 @@ class LearningRoadmapServiceTests(SimpleTestCase):
         })
 
         self.assertEqual(roadmap_input, {
+            'analysis_mode': 'structured',
             'existing_skills': ['Python', 'SQL'],
             'priority_gaps': [{
                 'skill': 'Django',
@@ -1176,6 +1236,7 @@ class LearningRoadmapServiceTests(SimpleTestCase):
         })
 
         self.assertEqual(roadmap_input, {
+            'analysis_mode': 'structured',
             'existing_skills': ['HPLC', 'Laboratory safety'],
             'priority_gaps': [{
                 'skill': 'GC-MS',
@@ -1184,6 +1245,42 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 'jd_evidence': ['GC-MS experience is required.'],
                 'cv_evidence': None,
             }],
+        })
+
+    def test_build_learning_roadmap_input_supports_low_coverage_candidate_priorities(self):
+        roadmap_input = build_learning_roadmap_input({
+            'analysis_mode': 'low_coverage_ai',
+            'cv_skills': [],
+            'missing_skill_details': [],
+            'low_coverage_source': {
+                'cv_text': 'Museum assistant with public engagement.',
+                'job_description_text': 'The role involves conservation planning.',
+            },
+            'ai_prioritisation': {
+                'status': 'success',
+                'mode': 'low_coverage_ai',
+                'priorities': [{
+                    'skill': 'Conservation planning',
+                    'priority': 'high',
+                    'reason': 'The JD emphasises conservation planning.',
+                }],
+            },
+        })
+
+        self.assertEqual(roadmap_input, {
+            'analysis_mode': 'low_coverage_ai',
+            'existing_skills': [],
+            'priority_gaps': [{
+                'skill': 'Conservation planning',
+                'priority': 'high',
+                'priority_reason': 'The JD emphasises conservation planning.',
+                'jd_evidence': [],
+                'cv_evidence': None,
+            }],
+            'source_context': {
+                'cv_text': 'Museum assistant with public engagement.',
+                'job_description_text': 'The role involves conservation planning.',
+            },
         })
 
     def test_validate_learning_roadmap_accepts_valid_structure(self):
@@ -2672,6 +2769,48 @@ class InterfaceLanguageTests(TestCase):
         self.assertNotContains(response, 'ACCOUNT ACCESS REQUIRED')
         self.assertEqual(get_user_model().objects.count(), 1)
 
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_low_coverage_analysis')
+    def test_low_coverage_registration_continuity_restores_page_three_without_gemini(
+        self,
+        mock_low_coverage,
+        mock_roadmap,
+    ):
+        mock_low_coverage.return_value = [
+            {
+                'skill': 'Conservation planning',
+                'priority': 'high',
+                'reason': 'The JD suggests conservation planning is important.',
+            },
+        ]
+        results_response = self._results_response(
+            'en',
+            cv_text='Museum assistant with public engagement.',
+            job_description_text='The role involves conservation planning and archive coordination.',
+        )
+        ai_response = self.client.post('/results/ai-prioritise/?lang=en', data={
+            'analysis_payload': results_response.context['analysis_payload'],
+            'output_language': 'en',
+        })
+        self._post_roadmap_auth_start(ai_response, 'en', 'register')
+        mock_low_coverage.reset_mock()
+        mock_roadmap.reset_mock()
+        response = self.client.post('/account/register/?lang=en&intent=roadmap', data={
+            'register-email': 'newstudent@example.com',
+            'register-password': 'VeryStrongPass123!',
+            'register-confirm_password': 'VeryStrongPass123!',
+        })
+        record = AnalysisRecord.objects.get()
+
+        mock_low_coverage.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertContains(response, 'Conservation planning')
+        self.assertContains(response, 'AI-Assisted Low-Coverage Analysis')
+        self.assertEqual(record.analysis_snapshot['analysis_mode'], 'low_coverage_ai')
+        self.assertEqual(record.priority_snapshot['mode'], 'low_coverage_ai')
+        self.assertNotIn('low_coverage_source', record.analysis_snapshot)
+
     @patch('analysis.views.prioritise_skill_gaps')
     def test_chinese_continuity_preserves_chinese_page_three(self, mock_prioritise):
         self._create_user(email='student@example.com', password='VeryStrongPass123!')
@@ -2763,6 +2902,34 @@ class InterfaceLanguageTests(TestCase):
         self.assertEqual(record.analysis_snapshot['missing_skills'], ['Django', 'REST APIs', 'JavaScript'])
         self.assertEqual(self.client.session['current_analysis_record_id'], record.id)
 
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_low_coverage_analysis')
+    @patch('analysis.views.prioritise_skill_gaps')
+    def test_authenticated_low_coverage_analysis_record_stores_mode_without_raw_text(
+        self,
+        mock_prioritise,
+        mock_low_coverage,
+        mock_roadmap,
+    ):
+        self._login_user()
+        response = self._results_response(
+            'en',
+            cv_text='Museum assistant with public engagement.',
+            job_description_text='The role involves conservation planning and archive coordination.',
+        )
+        record = AnalysisRecord.objects.get()
+
+        mock_prioritise.assert_not_called()
+        mock_low_coverage.assert_not_called()
+        mock_roadmap.assert_not_called()
+        self.assertTemplateUsed(response, 'analysis/results.html')
+        self.assertEqual(record.analysis_snapshot['analysis_state'], 'no_recognised_jd_skills')
+        self.assertEqual(record.analysis_snapshot['analysis_mode'], 'low_coverage_ai')
+        self.assertFalse(record.analysis_snapshot['match_score_available'])
+        self.assertEqual(record.analysis_snapshot['missing_skills'], [])
+        self.assertNotIn('low_coverage_source', record.analysis_snapshot)
+        self.assertNotIn('Museum assistant', json.dumps(record.analysis_snapshot))
+
     def test_guest_page_two_does_not_create_analysis_record(self):
         self._results_response('en')
 
@@ -2806,6 +2973,41 @@ class InterfaceLanguageTests(TestCase):
         self.assertEqual(AnalysisRecord.objects.count(), 1)
         self.assertEqual(record.status, AnalysisRecord.STATUS_ROADMAP_COMPLETED)
         self.assertEqual(record.roadmap_snapshot['skills'][0]['skill'], 'Django')
+
+    @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_low_coverage_analysis')
+    def test_low_coverage_success_can_continue_through_roadmap(self, mock_low_coverage, mock_roadmap):
+        self._login_user()
+        mock_low_coverage.return_value = [
+            {
+                'skill': 'Conservation planning',
+                'priority': 'high',
+                'reason': 'The JD suggests conservation planning is important.',
+            },
+        ]
+        mock_roadmap.return_value = _sample_roadmap(['Conservation planning'])
+        results_response = self._results_response(
+            'en',
+            cv_text='Museum assistant with public engagement.',
+            job_description_text='The role involves conservation planning and archive coordination.',
+        )
+        ai_response = self.client.post('/results/ai-prioritise/?lang=en', data={
+            'analysis_payload': results_response.context['analysis_payload'],
+            'output_language': 'en',
+        })
+        response = self._post_learning_roadmap(ai_response, 'en')
+        record = AnalysisRecord.objects.get()
+
+        mock_low_coverage.assert_called_once()
+        mock_roadmap.assert_called_once()
+        roadmap_results = mock_roadmap.call_args.args[0]
+        self.assertEqual(roadmap_results['analysis_mode'], 'low_coverage_ai')
+        self.assertIn('low_coverage_source', roadmap_results)
+        self.assertTemplateUsed(response, 'analysis/learning_roadmap.html')
+        self.assertEqual(record.status, AnalysisRecord.STATUS_ROADMAP_COMPLETED)
+        self.assertEqual(record.analysis_snapshot['analysis_mode'], 'low_coverage_ai')
+        self.assertEqual(record.priority_snapshot['mode'], 'low_coverage_ai')
+        self.assertEqual(record.roadmap_snapshot['skills'][0]['skill'], 'Conservation planning')
 
     @patch('analysis.views.prioritise_skill_gaps')
     def test_one_authenticated_journey_creates_only_one_record(self, mock_prioritise):
@@ -3231,9 +3433,49 @@ class InterfaceLanguageTests(TestCase):
         self.assertTrue(response.content.startswith(b'%PDF'))
         self.assertIn(b'STSong-Light', response.content)
 
+    def test_low_coverage_pdf_uses_unavailable_score_label(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            target_role='Unknown Domain Role',
+            analysis_snapshot={
+                'analysis_state': 'no_recognised_jd_skills',
+                'analysis_mode': 'low_coverage_ai',
+                'match_score_available': False,
+                'match_score': 0,
+                'match_score_explanation': (
+                    'FitGap could not reliably identify structured skills from this job description. '
+                    'You can still continue with an AI-assisted low-coverage analysis.'
+                ),
+                'matched_skills': [],
+                'missing_skills': [],
+            },
+            priority_snapshot={
+                'status': 'success',
+                'mode': 'low_coverage_ai',
+                'priorities': [{
+                    'skill': 'Conservation planning',
+                    'priority': 'high',
+                    'reason': 'The JD suggests conservation planning is important.',
+                }],
+            },
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
+        extracted_text = '\n'.join(
+            page.extract_text() or ''
+            for page in PdfReader(BytesIO(response.content)).pages
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('AI-Assisted Low-Coverage Analysis', extracted_text)
+        self.assertIn('Match Score: Not available', extracted_text)
+        self.assertIn('Conservation planning', extracted_text)
+
     @patch('analysis.views.generate_learning_roadmap')
+    @patch('analysis.views.prioritise_low_coverage_analysis')
     @patch('analysis.views.prioritise_skill_gaps')
-    def test_pdf_export_triggers_zero_gemini_calls(self, mock_prioritise, mock_roadmap):
+    def test_pdf_export_triggers_zero_gemini_calls(self, mock_prioritise, mock_low_coverage, mock_roadmap):
         self._login_user()
         user = get_user_model().objects.get(email='student@example.com')
         record = AnalysisRecord.objects.create(user=user, target_role='Saved Export')
@@ -3241,6 +3483,7 @@ class InterfaceLanguageTests(TestCase):
         self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
 
         mock_prioritise.assert_not_called()
+        mock_low_coverage.assert_not_called()
         mock_roadmap.assert_not_called()
 
     def test_pdf_export_does_not_create_analysis_record(self):
@@ -3956,7 +4199,10 @@ class InterfaceLanguageTests(TestCase):
         response = self._post_ai_prioritisation(results_response, 'en')
 
         mock_prioritise.assert_not_called()
+        self.assertEqual(results_response.context['results']['analysis_state'], 'all_recognised_skills_matched')
+        self.assertEqual(results_response.context['results']['analysis_mode'], 'structured')
         self.assertContains(response, 'No missing skills were identified for AI prioritisation.')
+        self.assertNotContains(response, 'AI-Assisted Low-Coverage Analysis')
 
     @patch('analysis.views.prioritise_skill_gaps')
     def test_one_or_two_missing_skills_are_handled(self, mock_prioritise):
@@ -4014,6 +4260,23 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, '<span class="badge text-bg-success">Matched</span>', html=True)
         self.assertContains(response, '<span class="badge text-bg-warning">Missing</span>', html=True)
 
+    def test_recognised_zero_overlap_remains_structured_ai_path(self):
+        response = self.client.post('/analyse/?lang=en', data={
+            'cv_text': 'Excel and financial modelling experience.',
+            'job_description_text': 'Python SQL Django REST APIs',
+            'output_language': 'en',
+        })
+        results = response.context['results']
+
+        self.assertEqual(results['analysis_state'], 'missing_skills_available')
+        self.assertEqual(results['analysis_mode'], 'structured')
+        self.assertTrue(results['match_score_available'])
+        self.assertEqual(results['match_score'], 0)
+        self.assertEqual(results['missing_skills'], ['Python', 'SQL', 'Django', 'REST APIs'])
+        self.assertContains(response, '0%')
+        self.assertContains(response, '✨ Prioritise My Skill Gaps with AI →')
+        self.assertNotContains(response, 'Continue with AI-Assisted Analysis')
+
     def test_chemistry_results_page_displays_cross_domain_analysis(self):
         response = self.client.post('/analyse/?lang=en', data={
             'cv_text': 'Experienced with HPLC, NMR spectroscopy and laboratory safety.',
@@ -4028,6 +4291,8 @@ class InterfaceLanguageTests(TestCase):
         self.assertContains(response, 'HPLC')
         self.assertContains(response, 'GC-MS')
         self.assertContains(response, 'Organic synthesis')
+        self.assertEqual(results['analysis_state'], 'missing_skills_available')
+        self.assertEqual(results['analysis_mode'], 'structured')
         self.assertEqual(results['matched_skills'], ['HPLC', 'Laboratory safety'])
         self.assertEqual(results['missing_skills'], ['ChemDraw', 'GC-MS', 'Organic synthesis'])
 
@@ -4162,8 +4427,14 @@ class InterfaceLanguageTests(TestCase):
             'output_language': 'en',
         })
 
-        self.assertContains(response, '0%')
-        self.assertContains(response, 'No recognised job-description skills were found')
+        self.assertContains(response, 'Match Score: Not available')
+        self.assertContains(
+            response,
+            'FitGap could not reliably identify structured skills from this job description. You can still continue with an AI-assisted low-coverage analysis.',
+        )
+        self.assertContains(response, 'AI-Assisted Low-Coverage Analysis')
+        self.assertContains(response, 'Continue with AI-Assisted Analysis')
+        self.assertNotContains(response, '<div class="progress"')
 
     def test_chinese_zero_job_description_skill_explanation(self):
         response = self.client.post('/analyse/?lang=zh', data={
@@ -4172,8 +4443,75 @@ class InterfaceLanguageTests(TestCase):
             'output_language': 'zh',
         })
 
-        self.assertContains(response, '0%')
-        self.assertContains(response, '岗位描述中未识别出技能')
+        self.assertContains(response, '匹配分数：暂不可计算')
+        self.assertContains(response, 'FitGap 未能从该职位描述中可靠识别出结构化技能。你仍然可以继续使用 AI 辅助的低覆盖分析。')
+        self.assertContains(response, 'AI 辅助低覆盖分析')
+        self.assertContains(response, '继续使用 AI 辅助分析')
+        self.assertNotContains(response, '<div class="progress"')
+
+    def test_result_context_distinguishes_all_matched_from_zero_jd_recognition(self):
+        all_matched_response = self.client.post('/analyse/?lang=en', data={
+            'cv_text': 'Python SQL Django',
+            'job_description_text': 'Python SQL Django',
+            'output_language': 'en',
+        })
+        low_coverage_response = self.client.post('/analyse/?lang=en', data={
+            'cv_text': 'Museum assistant with public engagement.',
+            'job_description_text': 'The role involves conservation planning and archive coordination.',
+            'output_language': 'en',
+        })
+
+        self.assertEqual(all_matched_response.context['results']['analysis_state'], 'all_recognised_skills_matched')
+        self.assertEqual(all_matched_response.context['results']['analysis_mode'], 'structured')
+        self.assertTrue(all_matched_response.context['results']['match_score_available'])
+        self.assertEqual(low_coverage_response.context['results']['analysis_state'], 'no_recognised_jd_skills')
+        self.assertEqual(low_coverage_response.context['results']['analysis_mode'], 'low_coverage_ai')
+        self.assertFalse(low_coverage_response.context['results']['match_score_available'])
+
+    @patch('analysis.views.prioritise_low_coverage_analysis')
+    def test_low_coverage_fallback_ai_success_does_not_alter_deterministic_missing_skills(self, mock_low_coverage):
+        mock_low_coverage.return_value = [
+            {'skill': 'Conservation planning', 'priority': 'high', 'reason': 'The JD emphasises conservation planning.'},
+        ]
+        results_response = self.client.post('/analyse/?lang=en', data={
+            'cv_text': 'Museum assistant with public engagement.',
+            'job_description_text': 'The role involves conservation planning and archive coordination.',
+            'output_language': 'en',
+        })
+        response = self.client.post('/results/ai-prioritise/?lang=en', data={
+            'analysis_payload': results_response.context['analysis_payload'],
+            'output_language': 'en',
+        })
+
+        mock_low_coverage.assert_called_once_with(
+            'Museum assistant with public engagement.',
+            'The role involves conservation planning and archive coordination.',
+            'en',
+        )
+        self.assertTemplateUsed(response, 'analysis/ai_results.html')
+        self.assertEqual(response.context['results']['missing_skills'], [])
+        self.assertEqual(response.context['results']['missing_skill_details'], [])
+        self.assertEqual(response.context['results']['ai_prioritisation']['mode'], 'low_coverage_ai')
+        self.assertContains(response, 'AI-suggested candidate learning priorities rather than verified missing skills')
+        self.assertContains(response, 'Conservation planning')
+
+    @patch('analysis.views.prioritise_low_coverage_analysis')
+    def test_low_coverage_fallback_gemini_failure_is_graceful(self, mock_low_coverage):
+        mock_low_coverage.side_effect = AIPrioritisationUnavailable
+        results_response = self.client.post('/analyse/?lang=en', data={
+            'cv_text': 'Museum assistant with public engagement.',
+            'job_description_text': 'The role involves conservation planning and archive coordination.',
+            'output_language': 'en',
+        })
+        response = self.client.post('/results/ai-prioritise/?lang=en', data={
+            'analysis_payload': results_response.context['analysis_payload'],
+            'output_language': 'en',
+        })
+
+        self.assertTemplateUsed(response, 'analysis/results.html')
+        self.assertContains(response, 'AI-assisted low-coverage analysis is temporarily unavailable.')
+        self.assertContains(response, 'Match Score: Not available')
+        self.assertEqual(response.status_code, 200)
 
     def test_language_preservation_after_post(self):
         response = self.client.post('/analyse/?lang=en', data={

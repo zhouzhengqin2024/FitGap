@@ -213,6 +213,15 @@ def _safe_api_error_metadata(exc, roadmap_input):
         for evidence in item.get('jd_evidence', [])
         if isinstance(evidence, str)
     ]
+    source_context = roadmap_input.get('source_context') or {}
+    sensitive_fragments.extend(
+        fragment
+        for fragment in [
+            source_context.get('cv_text'),
+            source_context.get('job_description_text'),
+        ]
+        if isinstance(fragment, str)
+    )
     message = _safe_api_message(getattr(exc, 'message', None), sensitive_fragments)
 
     metadata = {
@@ -238,6 +247,7 @@ def _exception_category(exc):
 
 def build_learning_roadmap_input(results):
     """Build privacy-minimised structured data for roadmap generation."""
+    analysis_mode = results.get('analysis_mode', 'structured')
     missing_details = {
         _normalise_skill(item['skill']): item
         for item in results.get('missing_skill_details', [])
@@ -258,10 +268,20 @@ def build_learning_roadmap_input(results):
             'cv_evidence': None,
         })
 
-    return {
+    roadmap_input = {
+        'analysis_mode': analysis_mode,
         'existing_skills': results.get('cv_skills', []),
         'priority_gaps': priority_gaps,
     }
+
+    if analysis_mode == 'low_coverage_ai':
+        source = results.get('low_coverage_source') or {}
+        roadmap_input['source_context'] = {
+            'cv_text': source.get('cv_text', ''),
+            'job_description_text': source.get('job_description_text', ''),
+        }
+
+    return roadmap_input
 
 
 def validate_learning_roadmap(response_data, verified_priority_skills):
@@ -465,6 +485,8 @@ def generate_learning_roadmap(results, language='en'):
             model=GEMINI_MODEL,
             contents=(
                 'Create a concise Minimum Viable Learning Path only for the verified priority gaps supplied. '
+                'If analysis_mode is low_coverage_ai, treat the priority gaps as AI-suggested candidate learning '
+                'priorities from a low-coverage analysis, not deterministic missing skills. '
                 'Optimise for employability progress, not comprehensive mastery. Estimate the minimum focused '
                 'effort required for this user, given their existing verified skills and the target job evidence, '
                 'to build credible role-relevant proof of the missing skill. Do not create a full course curriculum. '

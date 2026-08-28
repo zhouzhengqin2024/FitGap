@@ -26,6 +26,9 @@
                     <p class="text-muted mb-0">
                         {{ text.output_language_selected }} <strong>{{ results.output_language }}</strong>
                     </p>
+                    <p class="text-muted mb-0">
+                        {{ text.analysis_mode_label }} <strong>{{ results.analysis_mode_label }}</strong>
+                    </p>
                 </div>
 
                 <div class="alert alert-info" role="alert">
@@ -67,11 +70,15 @@
                 <section class="mb-4">
                     <h2 class="h4">{{ text.match_score }}</h2>
                     <p class="text-muted">{{ text.match_score_notice }}</p>
-                    <div class="progress" role="progressbar" aria-label="Match score" aria-valuenow="{{ results.match_score }}" aria-valuemin="0" aria-valuemax="100">
-                        <div class="progress-bar" style="width: {{ results.match_score }}%;">
-                            {{ results.match_score }}%
+                    {% if results.match_score_available %}
+                        <div class="progress" role="progressbar" aria-label="Match score" aria-valuenow="{{ results.match_score }}" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar" style="width: {{ results.match_score }}%;">
+                                {{ results.match_score }}%
+                            </div>
                         </div>
-                    </div>
+                    {% else %}
+                        <p class="h5 fw-bold mb-0">{{ text.match_score_unavailable_display }}</p>
+                    {% endif %}
                     <p class="text-muted mt-2 mb-0">{{ results.match_score_explanation }}</p>
                 </section>
 
@@ -199,16 +206,33 @@
                 </section>
 
                 <section class="mb-4 p-4 rounded-3" style="background: #F4F7FF; border: 1px solid #D7E3FF;">
-                    <h2 class="h3 fw-bold" style="color: #1D63ED;">{{ text.ai_recommended_next_steps }}</h2>
-                    <p class="text-muted">{{ text.ai_prioritisation_intro }}</p>
-                    <p class="fw-semibold" style="color: #1D63ED;">{{ text.ai_prioritisation_value }}</p>
+                    <h2 class="h3 fw-bold" style="color: #1D63ED;">
+                        {% if results.analysis_state == 'no_recognised_jd_skills' %}
+                            {{ text.ai_low_coverage_heading }}
+                        {% else %}
+                            {{ text.ai_recommended_next_steps }}
+                        {% endif %}
+                    </h2>
+                    {% if results.analysis_state == 'no_recognised_jd_skills' %}
+                        <p class="text-muted">{{ text.ai_low_coverage_intro }}</p>
+                        <p class="fw-semibold" style="color: #1D63ED;">{{ text.ai_low_coverage_value }}</p>
+                    {% else %}
+                        <p class="text-muted">{{ text.ai_prioritisation_intro }}</p>
+                        <p class="fw-semibold" style="color: #1D63ED;">{{ text.ai_prioritisation_value }}</p>
+                    {% endif %}
 
-                    {% if results.missing_skills %}
+                    {% if results.missing_skills or results.analysis_state == 'no_recognised_jd_skills' %}
                         <form method="post" action="{% url 'analysis:ai_prioritise' %}?lang={{ language }}" class="mb-3">
                             {% csrf_token %}
                             <input type="hidden" name="output_language" value="{{ language }}">
                             <input type="hidden" name="analysis_payload" value="{{ analysis_payload }}">
-                            <button type="submit" class="btn btn-lg text-white" style="background-color: #1D63ED; border-color: #1D63ED;">{{ text.ai_prioritise_button }}</button>
+                            <button type="submit" class="btn btn-lg text-white" style="background-color: #1D63ED; border-color: #1D63ED;">
+                                {% if results.analysis_state == 'no_recognised_jd_skills' %}
+                                    {{ text.ai_low_coverage_button }}
+                                {% else %}
+                                    {{ text.ai_prioritise_button }}
+                                {% endif %}
+                            </button>
                         </form>
                     {% else %}
                         <p class="text-muted">{{ text.ai_no_missing_skills }}</p>

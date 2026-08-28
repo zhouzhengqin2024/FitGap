@@ -123,6 +123,50 @@ def validate_ai_priorities(response_data, verified_missing_skills):
     return validated_priorities
 
 
+def validate_low_coverage_priorities(response_data):
+    """Validate AI-suggested priorities for low-coverage analyses."""
+    if not isinstance(response_data, dict):
+        raise AIPrioritisationUnavailable
+
+    priorities = response_data.get('priorities')
+
+    if not isinstance(priorities, list) or not priorities:
+        raise AIPrioritisationUnavailable
+
+    if len(priorities) > MAX_AI_PRIORITIES:
+        raise AIPrioritisationUnavailable
+
+    seen_skills = set()
+    validated_priorities = []
+
+    for item in priorities:
+        if not isinstance(item, dict):
+            raise AIPrioritisationUnavailable
+
+        skill = str(item.get('skill', '')).strip()
+        priority = str(item.get('priority', '')).strip().lower()
+        reason = str(item.get('reason', '')).strip()
+        normalised_skill = _normalise_skill(skill)
+
+        if not skill or not reason:
+            raise AIPrioritisationUnavailable
+
+        if priority not in ALLOWED_PRIORITIES:
+            raise AIPrioritisationUnavailable
+
+        if normalised_skill in seen_skills:
+            raise AIPrioritisationUnavailable
+
+        seen_skills.add(normalised_skill)
+        validated_priorities.append({
+            'skill': skill,
+            'priority': priority,
+            'reason': reason,
+        })
+
+    return validated_priorities
+
+
 def _extract_response_text(response):
     output_text = getattr(response, 'text', '')
 
@@ -201,6 +245,81 @@ def prioritise_skill_gaps(missing_skill_details, language='en'):
 
     logger.info(
         'Gemini call #1 prioritisation succeeded: elapsed_ms=%s result_count=%s',
+        _elapsed_ms(start_time),
+        len(priorities),
+    )
+    return priorities
+
+
+def prioritise_low_coverage_analysis(cv_text, job_description_text, language='en'):
+    """Use Gemini to suggest candidate priorities when no JD skills were recognised."""
+    start_time = time.monotonic()
+    api_key = os.environ.get('GEMINI_API_KEY')
+
+    if not api_key or genai is None:
+        logger.warning(
+            'Gemini call #1 low-coverage prioritisation failed: category=configuration elapsed_ms=%s',
+            _elapsed_ms(start_time),
+        )
+        raise AIPrioritisationUnavailable
+
+    selected_language = 'Simplified Chinese' if language == 'zh' else 'English'
+    client = genai.Client(api_key=api_key, http_options={'timeout': GEMINI_TIMEOUT_MS})
+
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=(
+                'FitGap deterministic skill recognition found no structured skills in the job description. '
+                'Suggest up to three candidate learning priorities from the supplied CV and job description only. '
+                'These are AI-suggested priorities for a low-coverage analysis, not deterministic missing skills. '
+                'Do not fabricate CV or job-description quotations. Do not claim a skill was deterministically '
+                'matched or missing. Use only concise role-relevant learning priorities grounded in the source text. '
+                'Machine-readable priority must be exactly one of high, medium, low. '
+                f'Write concise reasons in {selected_language}.\n\n'
+                + json.dumps({
+                    'analysis_mode': 'low_coverage_ai',
+                    'cv_text': cv_text,
+                    'job_description_text': job_description_text,
+                    'max_results': MAX_AI_PRIORITIES,
+                    'allowed_priorities': sorted(ALLOWED_PRIORITIES),
+                }, ensure_ascii=False)
+            ),
+            config={
+                'response_mime_type': 'application/json',
+                'response_json_schema': PRIORITISATION_RESPONSE_SCHEMA,
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            'Gemini call #1 low-coverage prioritisation failed: category=%s exception=%s elapsed_ms=%s',
+            _exception_category(exc),
+            exc.__class__.__name__,
+            _elapsed_ms(start_time),
+        )
+        raise AIPrioritisationUnavailable from exc
+
+    try:
+        response_data = json.loads(_extract_response_text(response))
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            'Gemini call #1 low-coverage prioritisation failed: category=json_parsing exception=%s elapsed_ms=%s',
+            exc.__class__.__name__,
+            _elapsed_ms(start_time),
+        )
+        raise AIPrioritisationUnavailable from exc
+
+    try:
+        priorities = validate_low_coverage_priorities(response_data)
+    except AIPrioritisationUnavailable:
+        logger.warning(
+            'Gemini call #1 low-coverage prioritisation failed: category=validation elapsed_ms=%s',
+            _elapsed_ms(start_time),
+        )
+        raise
+
+    logger.info(
+        'Gemini call #1 low-coverage prioritisation succeeded: elapsed_ms=%s result_count=%s',
         _elapsed_ms(start_time),
         len(priorities),
     )

@@ -9,7 +9,11 @@ from django.views.decorators.http import require_POST
 
 from .models import AnalysisRecord
 from .ai_learning_roadmap import LearningRoadmapUnavailable, generate_learning_roadmap
-from .ai_prioritisation import AIPrioritisationUnavailable, prioritise_skill_gaps
+from .ai_prioritisation import (
+    AIPrioritisationUnavailable,
+    prioritise_low_coverage_analysis,
+    prioritise_skill_gaps,
+)
 from .document_extraction import DocumentExtractionError, extract_document_text
 from .forms import AccountLoginForm, AccountRegistrationForm, AnalysisInputForm, AnalysisRenameForm
 from .pdf_export import build_analysis_record_pdf
@@ -25,6 +29,11 @@ from .translations import SUPPORTED_LANGUAGE_OPTIONS
 
 PENDING_ROADMAP_CONTINUITY_KEY = 'pending_roadmap_continuity'
 CURRENT_ANALYSIS_RECORD_KEY = 'current_analysis_record_id'
+ANALYSIS_STATE_MISSING_SKILLS_AVAILABLE = 'missing_skills_available'
+ANALYSIS_STATE_ALL_RECOGNISED_SKILLS_MATCHED = 'all_recognised_skills_matched'
+ANALYSIS_STATE_NO_RECOGNISED_JD_SKILLS = 'no_recognised_jd_skills'
+ANALYSIS_MODE_STRUCTURED = 'structured'
+ANALYSIS_MODE_LOW_COVERAGE_AI = 'low_coverage_ai'
 
 STATUS_ORDER = {
     AnalysisRecord.STATUS_STARTED: 0,
@@ -62,6 +71,26 @@ def _build_match_score_explanation(text, matched_skills, job_description_skills)
         matched_count=matched_skill_count,
         job_description_count=job_description_skill_count,
     )
+
+
+def _analysis_state(job_description_skills, missing_skills):
+    if not job_description_skills:
+        return ANALYSIS_STATE_NO_RECOGNISED_JD_SKILLS
+
+    if missing_skills:
+        return ANALYSIS_STATE_MISSING_SKILLS_AVAILABLE
+
+    return ANALYSIS_STATE_ALL_RECOGNISED_SKILLS_MATCHED
+
+
+def _analysis_mode_for_state(state):
+    if state == ANALYSIS_STATE_NO_RECOGNISED_JD_SKILLS:
+        return ANALYSIS_MODE_LOW_COVERAGE_AI
+    return ANALYSIS_MODE_STRUCTURED
+
+
+def _is_low_coverage_analysis(results):
+    return results.get('analysis_state') == ANALYSIS_STATE_NO_RECOGNISED_JD_SKILLS
 
 
 def _get_extraction_error_message(text, code):
@@ -173,6 +202,9 @@ def _analysis_snapshot(results):
         'matched_skill_details': results.get('matched_skill_details', []),
         'missing_skill_details': results.get('missing_skill_details', []),
         'learning_recommendations': results.get('learning_recommendations', []),
+        'analysis_state': results.get('analysis_state', ANALYSIS_STATE_MISSING_SKILLS_AVAILABLE),
+        'analysis_mode': results.get('analysis_mode', ANALYSIS_MODE_STRUCTURED),
+        'match_score_available': results.get('match_score_available', True),
     }
 
 
@@ -246,6 +278,13 @@ def _saved_record_context(record, language, text, rename_form=None):
     if priority_snapshot.get('status') == 'success':
         _add_ai_priority_labels(priority_snapshot.get('priorities', []), text)
     _add_roadmap_labels(roadmap_snapshot, text)
+    analysis_mode = analysis_snapshot.get('analysis_mode', ANALYSIS_MODE_STRUCTURED)
+    analysis_snapshot['analysis_mode_label'] = (
+        text['analysis_mode_low_coverage_ai']
+        if analysis_mode == ANALYSIS_MODE_LOW_COVERAGE_AI
+        else text['analysis_mode_structured']
+    )
+    analysis_snapshot['match_score_available'] = analysis_snapshot.get('match_score_available', True)
 
     return {
         'record': record,
@@ -276,6 +315,18 @@ def _apply_language_labels(results, language, text):
             results['matched_skills'],
             results['job_description_skills'],
         )
+
+    results.setdefault('analysis_state', _analysis_state(
+        results.get('job_description_skills', []),
+        results.get('missing_skills', []),
+    ))
+    results.setdefault('analysis_mode', _analysis_mode_for_state(results['analysis_state']))
+    results['match_score_available'] = results['analysis_state'] != ANALYSIS_STATE_NO_RECOGNISED_JD_SKILLS
+    results['analysis_mode_label'] = (
+        text['analysis_mode_low_coverage_ai']
+        if results['analysis_mode'] == ANALYSIS_MODE_LOW_COVERAGE_AI
+        else text['analysis_mode_structured']
+    )
 
     ai_prioritisation = results.get('ai_prioritisation')
 
@@ -383,6 +434,13 @@ def _build_ai_status(status, text, priorities=None):
         'status': status,
         'message': text[message_key],
         'priorities': [],
+    }
+
+
+def _build_low_coverage_source(cv_text, job_description_text):
+    return {
+        'cv_text': cv_text,
+        'job_description_text': job_description_text,
     }
 
 
@@ -745,6 +803,9 @@ def input_view(request):
         results['cv_skills'] = cv_skills
         results['job_description_skills'] = job_description_skills
         results.update(skill_comparison)
+        results['analysis_state'] = _analysis_state(job_description_skills, results['missing_skills'])
+        results['analysis_mode'] = _analysis_mode_for_state(results['analysis_state'])
+        results['match_score_available'] = results['analysis_state'] != ANALYSIS_STATE_NO_RECOGNISED_JD_SKILLS
         results['match_score'] = calculate_match_score(
             results['matched_skills'],
             job_description_skills,
@@ -765,6 +826,8 @@ def input_view(request):
             job_description_text,
             language,
         ))
+        if _is_low_coverage_analysis(results):
+            results['low_coverage_source'] = _build_low_coverage_source(cv_text, job_description_text)
 
         _persist_analysis_snapshot(request, language, results)
         return _render_results(request, language, results, text)
@@ -873,6 +936,33 @@ def ai_prioritise_view(request):
 
     missing_skill_details = results.get('missing_skill_details', [])
 
+    if _is_low_coverage_analysis(results):
+        source = results.get('low_coverage_source') or {}
+        cv_text = source.get('cv_text', '')
+        job_description_text = source.get('job_description_text', '')
+
+        if not cv_text or not job_description_text:
+            results['ai_prioritisation'] = _build_ai_status('fallback', text)
+            results['ai_prioritisation']['message'] = text['ai_low_coverage_unavailable']
+            return _render_results(request, language, results, text)
+
+        try:
+            priorities = prioritise_low_coverage_analysis(cv_text, job_description_text, language)
+        except AIPrioritisationUnavailable:
+            results['ai_prioritisation'] = _build_ai_status('fallback', text)
+            results['ai_prioritisation']['message'] = text['ai_low_coverage_unavailable']
+        else:
+            results['ai_prioritisation'] = _build_ai_status(
+                'success',
+                text,
+                _add_ai_priority_labels(priorities, text),
+            )
+            results['ai_prioritisation']['mode'] = ANALYSIS_MODE_LOW_COVERAGE_AI
+            _persist_priority_snapshot(request, language, results)
+            return _render_ai_results(request, language, results, text)
+
+        return _render_results(request, language, results, text)
+
     if not missing_skill_details:
         results['ai_prioritisation'] = _build_ai_status('empty', text)
         return _render_results(request, language, results, text)
@@ -887,6 +977,7 @@ def ai_prioritise_view(request):
             text,
             _add_ai_priority_labels(priorities, text),
         )
+        results['ai_prioritisation']['mode'] = ANALYSIS_MODE_STRUCTURED
         _persist_priority_snapshot(request, language, results)
         return _render_ai_results(request, language, results, text)
 

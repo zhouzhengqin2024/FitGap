@@ -29,7 +29,16 @@
 
                 <section class="mb-5 text-center mx-auto" style="max-width: 760px;" aria-labelledby="ai-results-heading">
                     <h1 id="ai-results-heading" class="display-5 fw-bold mb-3" style="color: #1D63ED;">{{ text.ai_recommended_next_steps }}</h1>
-                    <p class="lead text-secondary mb-0">{{ text.ai_results_intro }}</p>
+                    <p class="lead text-secondary mb-2">
+                        {% if results.analysis_mode == 'low_coverage_ai' %}
+                            {{ text.ai_low_coverage_results_intro }}
+                        {% else %}
+                            {{ text.ai_results_intro }}
+                        {% endif %}
+                    </p>
+                    <p class="text-muted mb-0">
+                        {{ text.analysis_mode_label }} <strong>{{ results.analysis_mode_label }}</strong>
+                    </p>
                 </section>
 
                 <section class="mb-4" aria-label="{{ text.ai_recommended_next_steps }}">
