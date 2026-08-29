@@ -1158,6 +1158,90 @@ class AIPrioritisationServiceTests(SimpleTestCase):
         self.assertNotIn('Django is required.', logged_output)
         self.assertNotIn('test-key', logged_output)
 
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.genai')
+    def test_ai_prioritisation_client_error_logs_safe_api_metadata(self, mock_genai):
+        class FakeClientError(Exception):
+            code = 429
+            status = 'RESOURCE_EXHAUSTED'
+            message = 'Quota exceeded for this project.'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = FakeClientError()
+
+        with self.assertLogs('analysis.ai_prioritisation', level='WARNING') as logs:
+            with self.assertRaises(AIPrioritisationUnavailable):
+                prioritise_skill_gaps([
+                    {
+                        'skill': 'Django',
+                        'cv_evidence': [],
+                        'jd_evidence': [{'excerpt': 'Django is required.'}],
+                    },
+                ], 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Gemini call #1 prioritisation failed: category=api_exception exception=FakeClientError', logged_output)
+        self.assertIn('code=429', logged_output)
+        self.assertIn('status=RESOURCE_EXHAUSTED', logged_output)
+        self.assertIn('message="Quota exceeded for this project."', logged_output)
+        self.assertNotIn('Django is required.', logged_output)
+        self.assertNotIn('test-key', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.genai')
+    def test_ai_prioritisation_client_error_omits_message_with_raw_evidence(self, mock_genai):
+        class FakeClientError(Exception):
+            code = 400
+            status = 'INVALID_ARGUMENT'
+            message = 'Invalid request included Django is required for this role.'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = FakeClientError()
+
+        with self.assertLogs('analysis.ai_prioritisation', level='WARNING') as logs:
+            with self.assertRaises(AIPrioritisationUnavailable):
+                prioritise_skill_gaps([
+                    {
+                        'skill': 'Django',
+                        'cv_evidence': [],
+                        'jd_evidence': [{'excerpt': 'Django is required for this role.'}],
+                    },
+                ], 'en')
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('code=400', logged_output)
+        self.assertIn('status=INVALID_ARGUMENT', logged_output)
+        self.assertIn('[omitted unsafe or overly long API message]', logged_output)
+        self.assertNotIn('Django is required for this role.', logged_output)
+
+    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.genai')
+    def test_low_coverage_client_error_does_not_log_cv_or_jd_text(self, mock_genai):
+        class FakeClientError(Exception):
+            code = 400
+            status = 'INVALID_ARGUMENT'
+            message = 'Invalid request included Museum assistant with public engagement.'
+
+        mock_client = mock_genai.Client.return_value
+        mock_client.models.generate_content.side_effect = FakeClientError()
+
+        with self.assertLogs('analysis.ai_prioritisation', level='WARNING') as logs:
+            with self.assertRaises(AIPrioritisationUnavailable):
+                prioritise_low_coverage_analysis(
+                    'Museum assistant with public engagement.',
+                    'The role involves conservation planning.',
+                    'en',
+                )
+
+        logged_output = '\n'.join(logs.output)
+        self.assertIn('Gemini call #1 low-coverage prioritisation failed: category=api_exception', logged_output)
+        self.assertIn('code=400', logged_output)
+        self.assertIn('status=INVALID_ARGUMENT', logged_output)
+        self.assertIn('[omitted unsafe or overly long API message]', logged_output)
+        self.assertNotIn('Museum assistant with public engagement.', logged_output)
+        self.assertNotIn('The role involves conservation planning.', logged_output)
+        self.assertNotIn('test-key', logged_output)
+
 
 class LearningRoadmapServiceTests(SimpleTestCase):
     def test_roadmap_response_schema_keeps_v11_fields_but_avoids_business_constraints(self):
@@ -1580,7 +1664,7 @@ class LearningRoadmapServiceTests(SimpleTestCase):
             'Gemini call #2 learning roadmap failed: category=api_exception exception=RuntimeError',
             logged_output,
         )
-        self.assertIn('status=unknown code=unknown message="unavailable"', logged_output)
+        self.assertIn('code=unknown status=unknown message="unavailable"', logged_output)
         self.assertNotIn('private JD payload', logged_output)
         self.assertNotIn('test-key', logged_output)
 
@@ -1612,8 +1696,8 @@ class LearningRoadmapServiceTests(SimpleTestCase):
 
         logged_output = '\n'.join(logs.output)
         self.assertIn('Gemini call #2 learning roadmap failed: category=api_exception exception=FakeClientError', logged_output)
-        self.assertIn('status=400', logged_output)
-        self.assertIn('code=INVALID_ARGUMENT', logged_output)
+        self.assertIn('code=400', logged_output)
+        self.assertIn('status=INVALID_ARGUMENT', logged_output)
         self.assertIn('Invalid response_json_schema: unsupported field additionalProperties.', logged_output)
         self.assertNotIn('test-key', logged_output)
         self.assertNotIn('Django is required.', logged_output)
@@ -1645,8 +1729,8 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }, 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('status=400', logged_output)
-        self.assertIn('code=INVALID_ARGUMENT', logged_output)
+        self.assertIn('code=400', logged_output)
+        self.assertIn('status=INVALID_ARGUMENT', logged_output)
         self.assertIn('[omitted unsafe or overly long API message]', logged_output)
         self.assertNotIn('Django is required for this role.', logged_output)
 
@@ -3413,6 +3497,118 @@ class InterfaceLanguageTests(TestCase):
         self.assertEqual(response['Content-Disposition'], f'attachment; filename="fitgap-report-{record.id}.pdf"')
         self.assertTrue(response.content.startswith(b'%PDF'))
         self.assertGreaterEqual(len(PdfReader(BytesIO(response.content)).pages), 1)
+
+    def test_english_pdf_uses_english_labels_and_latin_font(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            target_role='Backend Developer',
+            analysis_snapshot={
+                'analysis_mode': 'structured',
+                'match_score': 50,
+                'match_score_explanation': '1 of 2 recognised job-description skills were found in the CV.',
+                'matched_skills': ['Python'],
+                'missing_skills': ['Django'],
+                'matched_skill_details': [{
+                    'skill': 'Python',
+                    'cv_evidence': [{'excerpt': 'Built tools with Python.'}],
+                    'jd_evidence': [{'excerpt': 'The role requires Python.'}],
+                }],
+            },
+            priority_snapshot={
+                'status': 'success',
+                'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Django is a verified gap.'}],
+            },
+            roadmap_snapshot=_sample_roadmap(['Django']),
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
+        extracted_text = '\n'.join(page.extract_text() or '' for page in PdfReader(BytesIO(response.content)).pages)
+
+        self.assertIn('Personalised Skill-Gap & Learning Roadmap Report', extracted_text)
+        self.assertIn('Analysis Mode:', extracted_text)
+        self.assertIn('Skill Gap Summary', extracted_text)
+        self.assertIn('Matched Skills', extracted_text)
+        self.assertIn('Missing Skills', extracted_text)
+        self.assertIn('Evidence from CV', extracted_text)
+        self.assertIn('Evidence from Job Description', extracted_text)
+        self.assertIn('AI Priority Recommendations', extracted_text)
+        self.assertIn('Personalised Learning Roadmap', extracted_text)
+        self.assertIn('- Python', extracted_text)
+        self.assertIn('1. Build a Django mini feature - Create a small deliverable using Django.', extracted_text)
+        self.assertNotIn('已匹配技能', extracted_text)
+        self.assertNotIn('缺失技能', extracted_text)
+        self.assertNotIn('简历证据', extracted_text)
+        self.assertNotIn('职位描述证据', extracted_text)
+        self.assertIn(b'Helvetica', response.content)
+        self.assertNotIn(b'STSong-Light', response.content)
+
+    def test_chinese_pdf_uses_chinese_labels_and_cjk_font(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        record = AnalysisRecord.objects.create(
+            user=user,
+            target_role='后端开发',
+            analysis_snapshot={
+                'analysis_mode': 'structured',
+                'match_score': 50,
+                'match_score_explanation': '岗位描述中识别出的2项技能里，有1项在简历中被找到。',
+                'matched_skills': ['Python'],
+                'missing_skills': ['Django'],
+                'matched_skill_details': [{
+                    'skill': 'Python',
+                    'cv_evidence': [{'excerpt': '使用 Python 构建工具。'}],
+                    'jd_evidence': [{'excerpt': '岗位需要 Python。'}],
+                }],
+            },
+            priority_snapshot={
+                'status': 'success',
+                'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Django 是已保存的优先级。'}],
+            },
+            roadmap_snapshot=_sample_roadmap(['Django']),
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=zh')
+        extracted_text = '\n'.join(page.extract_text() or '' for page in PdfReader(BytesIO(response.content)).pages)
+
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn(b'STSong-Light', response.content)
+        self.assertIn('FitGap', extracted_text)
+        self.assertIn('FitGap 个性化技能差距与学习路径报告', extracted_text)
+        self.assertIn('导出时间', extracted_text)
+        self.assertIn('目标岗位', extracted_text)
+        self.assertIn('分析模式', extracted_text)
+        self.assertIn('匹配分数', extracted_text)
+        self.assertIn('技能差距概览', extracted_text)
+        self.assertIn('已匹配技能', extracted_text)
+        self.assertIn('缺失技能', extracted_text)
+        self.assertIn('证据', extracted_text)
+        self.assertIn('简历证据', extracted_text)
+        self.assertIn('职位描述证据', extracted_text)
+        self.assertIn('AI 优先级建议', extracted_text)
+        self.assertIn('个性化学习路径', extracted_text)
+        self.assertIn('Django', extracted_text)
+        self.assertNotIn('Personalised Skill-Gap & Learning Roadmap Report', extracted_text)
+        self.assertNotIn('Matched Skills', extracted_text)
+        self.assertNotIn('Missing Skills', extracted_text)
+
+    def test_pdf_roadmap_content_comes_from_saved_snapshot_order(self):
+        self._login_user()
+        user = get_user_model().objects.get(email='student@example.com')
+        roadmap = _sample_roadmap(['REST APIs', 'Django'])
+        roadmap['skills'][0]['target_outcome'] = 'Saved REST APIs target from database snapshot.'
+        roadmap['skills'][1]['target_outcome'] = 'Saved Django target from database snapshot.'
+        record = AnalysisRecord.objects.create(
+            user=user,
+            target_role='Backend Developer',
+            analysis_snapshot={'match_score': 50, 'matched_skills': [], 'missing_skills': ['REST APIs', 'Django']},
+            roadmap_snapshot=roadmap,
+        )
+        response = self.client.get(f'/account/analyses/{record.id}/download-pdf/?lang=en')
+        extracted_text = '\n'.join(page.extract_text() or '' for page in PdfReader(BytesIO(response.content)).pages)
+
+        self.assertLess(extracted_text.index('REST APIs'), extracted_text.index('Django'))
+        self.assertIn('Saved REST APIs target from database snapshot.', extracted_text)
+        self.assertIn('Saved Django target from database snapshot.', extracted_text)
 
     def test_user_b_cannot_export_user_a_pdf(self):
         user_a = self._create_user(email='a@example.com')

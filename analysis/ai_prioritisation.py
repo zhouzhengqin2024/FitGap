@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 
 try:
@@ -13,6 +14,7 @@ GEMINI_MODEL = 'gemini-3.6-flash'
 GEMINI_TIMEOUT_MS = 45000
 ALLOWED_PRIORITIES = {'high', 'medium', 'low'}
 MAX_AI_PRIORITIES = 3
+MAX_LOGGED_API_MESSAGE_LENGTH = 500
 logger = logging.getLogger(__name__)
 
 PRIORITISATION_RESPONSE_SCHEMA = {
@@ -54,6 +56,53 @@ def _exception_category(exc):
 
 def _normalise_skill(skill):
     return str(skill).strip().lower()
+
+
+def _safe_api_message(message, sensitive_fragments=None):
+    if not isinstance(message, str) or not message.strip():
+        return None
+
+    safe_message = ' '.join(message.split())
+    api_key = os.environ.get('GEMINI_API_KEY')
+
+    if api_key:
+        safe_message = safe_message.replace(api_key, '[redacted]')
+
+    safe_message = re.sub(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+', '[redacted-email]', safe_message)
+    safe_message = re.sub(r'\+?\d[\d\s().-]{7,}\d', '[redacted-phone]', safe_message)
+
+    if len(safe_message) > MAX_LOGGED_API_MESSAGE_LENGTH:
+        return '[omitted unsafe or overly long API message]'
+
+    unsafe_markers = [
+        'analysis_payload',
+        'contents=',
+        'response_json_schema=',
+        'responseJsonSchema',
+        'GEMINI_API_KEY',
+    ]
+    if any(marker in safe_message for marker in unsafe_markers):
+        return '[omitted unsafe or overly long API message]'
+
+    for fragment in sensitive_fragments or []:
+        if fragment and len(fragment) > 20 and fragment in safe_message:
+            return '[omitted unsafe or overly long API message]'
+
+    return safe_message
+
+
+def safe_api_error_metadata(exc, sensitive_fragments=None):
+    """Return concise API error metadata without request payloads or secrets."""
+    metadata = {
+        'code': getattr(exc, 'code', None),
+        'status': getattr(exc, 'status', None),
+    }
+    message = _safe_api_message(getattr(exc, 'message', None), sensitive_fragments)
+
+    if message:
+        metadata['message'] = message
+
+    return metadata
 
 
 def build_ai_gap_input(missing_skill_details):
@@ -216,11 +265,24 @@ def prioritise_skill_gaps(missing_skill_details, language='en'):
             },
         )
     except Exception as exc:
+        metadata = safe_api_error_metadata(
+            exc,
+            [
+                evidence
+                for item in gap_input
+                for evidence in item.get('jd_evidence', [])
+                if isinstance(evidence, str)
+            ],
+        )
         logger.warning(
-            'Gemini call #1 prioritisation failed: category=%s exception=%s elapsed_ms=%s',
+            'Gemini call #1 prioritisation failed: category=%s exception=%s elapsed_ms=%s '
+            'code=%s status=%s message="%s"',
             _exception_category(exc),
             exc.__class__.__name__,
             _elapsed_ms(start_time),
+            metadata.get('code') or 'unknown',
+            metadata.get('status') or 'unknown',
+            metadata.get('message') or 'unavailable',
         )
         raise AIPrioritisationUnavailable from exc
 
@@ -291,11 +353,16 @@ def prioritise_low_coverage_analysis(cv_text, job_description_text, language='en
             },
         )
     except Exception as exc:
+        metadata = safe_api_error_metadata(exc, [cv_text, job_description_text])
         logger.warning(
-            'Gemini call #1 low-coverage prioritisation failed: category=%s exception=%s elapsed_ms=%s',
+            'Gemini call #1 low-coverage prioritisation failed: category=%s exception=%s elapsed_ms=%s '
+            'code=%s status=%s message="%s"',
             _exception_category(exc),
             exc.__class__.__name__,
             _elapsed_ms(start_time),
+            metadata.get('code') or 'unknown',
+            metadata.get('status') or 'unknown',
+            metadata.get('message') or 'unavailable',
         )
         raise AIPrioritisationUnavailable from exc
 

@@ -125,8 +125,8 @@ TRANSLATIONS = {
         'pdf_skill_gap_summary': 'Skill Gap Summary',
         'pdf_matched_skills': 'Matched Skills',
         'pdf_missing_skills': 'Missing Skills',
-        'pdf_priorities_heading': 'Saved AI Priorities',
-        'pdf_roadmap_heading': 'Saved Learning Roadmap',
+        'pdf_priorities_heading': 'AI Priority Recommendations',
+        'pdf_roadmap_heading': 'Personalised Learning Roadmap',
         'pdf_history_hint': 'You can also manage and re-download saved reports from History.',
         'pdf_section_unavailable': 'No saved content is available for this section.',
         'pdf_footer_disclaimer': (

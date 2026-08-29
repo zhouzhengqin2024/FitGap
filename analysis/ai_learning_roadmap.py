@@ -225,8 +225,8 @@ def _safe_api_error_metadata(exc, roadmap_input):
     message = _safe_api_message(getattr(exc, 'message', None), sensitive_fragments)
 
     metadata = {
-        'status': getattr(exc, 'code', None),
-        'code': getattr(exc, 'status', None),
+        'code': getattr(exc, 'code', None),
+        'status': getattr(exc, 'status', None),
     }
 
     if message:
@@ -532,12 +532,12 @@ def generate_learning_roadmap(results, language='en'):
         metadata = _safe_api_error_metadata(exc, roadmap_input)
         logger.warning(
             'Gemini call #2 learning roadmap failed: category=%s exception=%s elapsed_ms=%s '
-            'status=%s code=%s message="%s"',
+            'code=%s status=%s message="%s"',
             _exception_category(exc),
             exc.__class__.__name__,
             _elapsed_ms(start_time),
-            metadata.get('status') or 'unknown',
             metadata.get('code') or 'unknown',
+            metadata.get('status') or 'unknown',
             metadata.get('message') or 'unavailable',
         )
         raise _fail('Gemini request failed') from exc
