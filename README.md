@@ -1,93 +1,180 @@
-# Development Project
+# FitGap
 
+## AI-Assisted Skill-Gap Analysis and Learning Recommendations for International Students
 
+FitGap is a bilingual web application developed as an MSc IT+ individual project at the University of Glasgow.
 
-## Getting started
+The system helps users compare a CV with a target job description, identify recognised skill matches and gaps, prioritise missing skills, and generate a personalised learning roadmap.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Live Application
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Production deployment:
 
-## Add your files
+https://fitgap-ai.up.railway.app/
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+---
 
-```
-cd existing_repo
-git remote add origin https://stgit.dcs.gla.ac.uk/msc-project-for-information-technology/2025/it-project-3075337z/3075337z-development-project.git
-git branch -M main
-git push -uf origin main
-```
+## Core Features
 
-## Integrate with your tools
+- CV and job-description text input
+- PDF, DOCX and TXT document extraction
+- English and Simplified Chinese interface
+- Deterministic skill extraction and normalisation
+- Matched and missing skill identification
+- Evidence-based skill-gap explanation
+- Explainable match score
+- Gemini-assisted skill prioritisation
+- Gemini-assisted personalised learning roadmap
+- Low-coverage AI fallback
+- User authentication
+- Saved analysis history
+- PDF roadmap export
+- Cross-domain skill support
+- Responsive web interface
 
-- [ ] [Set up project integrations](https://stgit.dcs.gla.ac.uk/msc-project-for-information-technology/2025/it-project-3075337z/3075337z-development-project/-/settings/integrations)
+---
 
-## Collaborate with your team
+## Design Principle
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+A central design principle of FitGap is:
 
-## Test and Deploy
+> **Facts are deterministic; AI provides decision support.**
 
-Use the built-in continuous integration in GitLab.
+Skill matching, recognised evidence and match-score calculation are primarily handled using deterministic logic.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+Gemini is used for higher-level decision support, including:
 
-***
+1. prioritising identified skill gaps; and
+2. generating personalised learning roadmaps.
 
-# Editing this README
+This separation was chosen to improve explainability, predictability and testability while reducing reliance on generative AI for factual matching.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+---
 
-## Suggestions for a good README
+## Technology Stack
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+- Python
+- Django
+- HTML / CSS
+- Bootstrap
+- SQLite for local development
+- PostgreSQL for production
+- Google Gemini API
+- ReportLab
+- Gunicorn
+- WhiteNoise
+- Railway
 
-## Name
-Choose a self-explaining name for your project.
+---
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## Project Structure
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+### `analysis/`
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Contains the main FitGap application and business logic.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Important modules include:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+- `views.py` — application request handling and user workflow
+- `models.py` — persistent analysis records and history
+- `services.py` — core analysis services
+- `skill_catalogue.py` — canonical skills and aliases
+- `skill_candidates.py` — skill candidate identification
+- `skill_normalisation.py` — skill normalisation logic
+- `ai_prioritisation.py` — Gemini Call #1 for skill-gap prioritisation
+- `ai_learning_roadmap.py` — Gemini Call #2 for learning-roadmap generation
+- `pdf_export.py` — PDF generation from saved analysis results
+- `tests.py` — automated test suite
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### `config/`
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Contains Django project-level configuration, including:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+- settings
+- URL configuration
+- WSGI / ASGI entry points
+- production environment configuration
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### `requirements.txt`
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Lists Python dependencies required by the project.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+---
 
-## License
-For open source projects, say how it is licensed.
+## Student Contribution and AI-Assisted Development
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+This project was completed as an individual MSc IT+ project.
+
+I was responsible for the overall ownership and direction of the project, including:
+
+- identifying the project problem and target users;
+- defining and refining the project scope;
+- gathering and prioritising requirements;
+- deciding the overall user workflow and product structure;
+- making UX and bilingual-interface decisions;
+- defining the architectural boundary between deterministic analysis and generative AI;
+- deciding which features belonged in the MVP;
+- defining acceptance criteria for iterations;
+- selecting and prioritising later improvements;
+- conducting manual functional and cross-domain testing;
+- reviewing system behaviour and identifying failures;
+- deciding how identified problems should be addressed;
+- evaluating the final product;
+- configuring and validating production deployment;
+- maintaining Git commits and version history;
+- determining when the product was ready for feature freeze.
+
+Generative-AI development tools, particularly ChatGPT and Codex, were used extensively to assist with software implementation.
+
+AI assistance included:
+
+- generating and modifying code;
+- suggesting implementation approaches;
+- helping create and extend automated tests;
+- debugging technical errors;
+- supporting deployment troubleshooting;
+- assisting with code-level refinements.
+
+The coding implementation was therefore substantially AI-assisted.
+
+However, AI-generated or AI-suggested changes were not treated as independent project decisions. I remained responsible for defining what the system should do, deciding whether proposed changes matched the project requirements, running automated and manual tests, validating user-facing behaviour, selecting which changes to retain, and managing the final integrated product.
+
+This distinction is important: AI tools supported implementation, while the project requirements, product decisions, architectural constraints, testing decisions, iteration priorities, evaluation and final acceptance remained my responsibility.
+
+---
+
+## Major Development Iterations
+
+The system was developed incrementally.
+
+Important later iterations included:
+
+- evidence-based explanations for matched and missing skills;
+- document upload and text extraction;
+- Gemini-based prioritisation;
+- authentication and guest-to-account continuity;
+- saved analysis history;
+- cross-domain skill extraction and normalisation;
+- Gemini timeout and fallback handling;
+- low-coverage AI-assisted analysis;
+- bilingual PDF roadmap export;
+- Railway production deployment;
+- PostgreSQL production database;
+- cross-platform PDF compatibility improvements.
+
+Cross-domain testing exposed limitations in the original IT-focused skill catalogue, which led to redesign of the skill extraction and normalisation approach.
+
+Further testing also showed that a job description with very low deterministic skill coverage should not be treated as a genuine zero match. A separate low-coverage AI-assisted workflow was therefore introduced.
+
+---
+
+## Testing
+
+The final automated test suite contains:
+
+**333 passing tests**
+
+Run the test suite with:
+
+```bash
+python manage.py test
