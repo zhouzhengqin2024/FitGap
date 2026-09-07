@@ -1,0 +1,134 @@
+FitGap - Code List
+Student: Zhengqin Zhou
+Student Number: 3075337Z
+Project: MSc IT+ Project
+
+AI Assistance Statement
+-----------------------
+FitGap was developed as an individual MSc IT+ project.
+
+I was responsible for the project problem definition, requirements,
+scope, product decisions, architecture, acceptance criteria, testing decisions,
+manual validation, evaluation, iteration priorities, deployment decisions and
+final integration.
+
+Generative AI development tools, primarily ChatGPT and Codex, were used
+extensively to assist with implementation, code generation and modification,
+debugging, automated test development and deployment troubleshooting.
+
+AI-assisted code was reviewed, tested and integrated by me. The
+implementation should therefore be regarded as substantially AI-assisted while
+the project direction, requirements, architecture constraints, validation and
+final acceptance remained the student's responsibility.
+
+
+Key Project Modules
+-------------------
+
+analysis/views.py
+Main Django request-handling and application workflow module.
+Coordinates CV/JD input, analysis, authentication-related workflow,
+results, saved analyses and roadmap interactions.
+AI assistance: Significant AI assistance during implementation and refinement.
+
+analysis/services.py
+Core deterministic skill-analysis services, including CV/JD comparison,
+matched/missing skill processing, evidence generation and match behaviour.
+AI assistance: Significant AI assistance during implementation and refinement.
+
+analysis/skill_catalogue.py
+Defines canonical skills, aliases and broader cross-domain skill coverage.
+AI assistance: AI-assisted expansion and refinement; scope and final
+acceptance determined by the student.
+
+analysis/skill_candidates.py
+Implements candidate skill discovery used by the deterministic analysis layer.
+AI assistance: Significant AI assistance during implementation and testing.
+
+analysis/skill_normalisation.py
+Implements canonicalisation and normalisation of related skill terminology.
+AI assistance: Significant AI assistance during implementation and testing.
+
+analysis/ai_prioritisation.py
+Integrates the Gemini API for prioritisation of verified skill gaps.
+Includes AI-service handling and fallback-related behaviour.
+AI assistance: Significant AI assistance during implementation and debugging.
+
+analysis/ai_learning_roadmap.py
+Integrates the Gemini API for personalised learning-roadmap generation.
+AI assistance: Significant AI assistance during implementation and debugging.
+
+analysis/document_extraction.py
+Extracts editable text from PDF, DOCX and TXT inputs.
+AI assistance: AI-assisted implementation and testing.
+
+analysis/models.py
+Defines persistent analysis records and saved-history data used by FitGap.
+AI assistance: AI-assisted implementation and modification.
+
+analysis/forms.py
+Django forms used in the application's input and account-related workflows.
+AI assistance: AI-assisted implementation and refinement.
+
+analysis/pdf_export.py
+Generates PDF learning-roadmap exports from saved analysis data and supports
+English and Simplified Chinese output.
+AI assistance: Significant AI assistance during implementation,
+cross-platform troubleshooting and testing.
+
+analysis/translations.py
+Contains application-level bilingual English/Simplified Chinese interface text.
+AI assistance: AI-assisted implementation and refinement.
+
+analysis/urls.py
+Defines URL routes for the FitGap Django application.
+AI assistance: AI-assisted implementation.
+
+analysis/tests.py
+Automated Django test suite covering core analysis behaviour, document
+processing, authentication/persistence, AI fallback behaviour, cross-domain
+matching, PDF generation and other application workflows.
+Final suite: 333 passing tests.
+AI assistance: Tests were substantially AI-assisted; the student selected
+testing priorities, ran the tests, investigated failures and validated final behaviour.
+
+analysis/templates/analysis/
+Django HTML templates implementing the FitGap user interface, including
+landing, input, analysis results, authentication, history and learning roadmap.
+AI assistance: Significant AI assistance during implementation and refinement.
+
+analysis/static/analysis/fitgap-logo.svg
+FitGap interface branding asset.
+
+config/settings.py
+Django configuration for local and production environments, including
+environment-variable configuration, PostgreSQL support and production security
+settings.
+AI assistance: AI-assisted deployment configuration and troubleshooting.
+
+config/urls.py
+Project-level Django URL configuration.
+AI assistance: AI-assisted implementation.
+
+config/asgi.py
+Standard Django ASGI entry point with minimal project-specific modification.
+
+config/wsgi.py
+Standard Django WSGI entry point used by the production deployment.
+
+analysis/migrations/
+Django-generated database migrations for the FitGap data model.
+
+manage.py
+Standard Django project management entry point.
+
+requirements.txt
+Python dependency specification for the application.
+
+.env.example
+Example environment-variable configuration. Contains placeholders only and
+does not contain production secrets.
+
+README.md
+Project overview, design principles, technology stack, feature description,
+AI-assistance disclosure and testing information.

@@ -178,3 +178,7 @@ Run the test suite with:
 
 ```bash
 python manage.py test
+```
+
+For complete setup instructions, see SoftwarePrereqs.txt.
+For the project module and AI-assistance listing, see CodeList.txt.

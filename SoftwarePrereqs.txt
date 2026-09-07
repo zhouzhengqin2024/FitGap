@@ -1,0 +1,179 @@
+FitGap - Software Prerequisites and Setup Instructions
+Student: Zhengqin Zhou
+Student Number: 3075337Z
+
+1. Application Type
+-------------------
+Python Django web application
+
+2. Main Software Stack
+----------------------
+Language:
+Python 3.13
+
+Framework:
+Django 6.0.7
+
+Local Development Database:
+SQLite
+
+Production Database:
+PostgreSQL
+
+Frontend:
+Django Templates
+HTML
+CSS
+Bootstrap
+Limited JavaScript
+
+External AI Service:
+Google Gemini API
+
+Production Components:
+Gunicorn
+WhiteNoise
+PostgreSQL
+Railway
+
+3. Python Dependencies
+----------------------
+All Python package dependencies are defined in requirements.txt.
+
+Current direct dependencies include:
+
+asgiref==3.12.1
+dj-database-url==3.0.1
+Django==6.0.7
+google-genai>=1.0.0
+gunicorn==23.0.0
+psycopg==3.3.2
+pypdf==6.15.0
+python-docx==1.2.0
+reportlab>=4.2,<5.0
+sqlparse==0.5.5
+whitenoise==6.11.0
+
+4. Recommended Local Setup
+--------------------------
+
+Create and activate a Python virtual environment:
+
+macOS / Linux:
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+Windows:
+
+python -m venv .venv
+.venv\Scripts\activate
+
+Install dependencies:
+
+pip install -r requirements.txt
+
+5. Environment Variables
+------------------------
+The repository includes .env.example showing the required production-style
+environment variables.
+
+Important variables include:
+
+DJANGO_SECRET_KEY
+DJANGO_DEBUG
+DJANGO_ALLOWED_HOSTS
+DJANGO_CSRF_TRUSTED_ORIGINS
+DJANGO_SECURE_SSL_REDIRECT
+DJANGO_SECURE_HSTS_SECONDS
+DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS
+DJANGO_SECURE_HSTS_PRELOAD
+DATABASE_URL
+GEMINI_API_KEY
+
+The .env.example file contains placeholder values only.
+
+A real Gemini API key is required for Gemini-assisted prioritisation and
+learning-roadmap generation.
+
+No production API keys, passwords or other secrets are included in the
+submission package.
+
+6. Database Setup
+-----------------
+For local development, Django can use SQLite.
+
+Create/apply the database schema with:
+
+python manage.py migrate
+
+The local db.sqlite3 development database is not required because the schema
+can be reconstructed from the included Django migrations.
+
+Production deployment uses PostgreSQL through DATABASE_URL.
+
+7. Run the Application Locally
+------------------------------
+After installing dependencies and running migrations:
+
+python manage.py runserver
+
+The default Django development server will normally be available at:
+
+http://127.0.0.1:8000/
+
+A different port can be selected if required, for example:
+
+python manage.py runserver 8001
+
+8. System Check
+---------------
+Run:
+
+python manage.py check
+
+The final submitted project completed the Django system check successfully.
+
+9. Automated Tests
+------------------
+Run:
+
+python manage.py test
+
+The final project test suite contains 333 passing automated tests.
+
+Some functionality involving external Gemini requests may require a valid
+GEMINI_API_KEY and network access, while tests use appropriate isolation or
+mocking where implemented.
+
+10. Production Deployment
+-------------------------
+The final production application was deployed on Railway using:
+
+Django
+Gunicorn
+WhiteNoise
+PostgreSQL
+
+Production-sensitive settings are supplied through environment variables rather
+than hard-coded credentials.
+
+Live application at the time of submission:
+
+https://fitgap-ai.up.railway.app/
+
+11. Security / Submission Notes
+-------------------------------
+The submission package intentionally excludes:
+
+.env
+production API keys
+database passwords
+local virtual environments
+Git internal metadata
+Python cache files
+generated staticfiles
+the local development SQLite database
+
+These files are unnecessary for source-code review and may contain local or
+sensitive information.
