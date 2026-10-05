@@ -50,12 +50,16 @@ Implements canonicalisation and normalisation of related skill terminology.
 AI assistance: Significant AI assistance during implementation and testing.
 
 analysis/ai_prioritisation.py
-Integrates the Gemini API for prioritisation of verified skill gaps.
-Includes AI-service handling and fallback-related behaviour.
+Integrates the DeepSeek OpenAI-compatible API through the OpenAI Python SDK.
+Contains two request paths: DeepSeek-based prioritisation of verified skill gaps
+and low-coverage AI-assisted prioritisation. Includes local JSON validation,
+AI-service handling and fallback-related behaviour.
 AI assistance: Significant AI assistance during implementation and debugging.
 
 analysis/ai_learning_roadmap.py
-Integrates the Gemini API for personalised learning-roadmap generation.
+Uses the OpenAI Python SDK and DeepSeek OpenAI-compatible API for
+DeepSeek-generated personalised learning roadmaps. Contains one request path
+and validates the nested JSON output against existing priority skills.
 AI assistance: Significant AI assistance during implementation and debugging.
 
 analysis/document_extraction.py
@@ -88,7 +92,8 @@ analysis/tests.py
 Automated Django test suite covering core analysis behaviour, document
 processing, authentication/persistence, AI fallback behaviour, cross-domain
 matching, PDF generation and other application workflows.
-Final suite: 333 passing tests.
+Latest full run after DeepSeek migration: 345 passing tests, including 69 AI
+service and boundary tests. Original submission: 333 passing tests.
 AI assistance: Tests were substantially AI-assisted; the student selected
 testing priorities, ran the tests, investigated failures and validated final behaviour.
 
@@ -123,11 +128,14 @@ manage.py
 Standard Django project management entry point.
 
 requirements.txt
-Python dependency specification for the application.
+Python dependency specification for the application, including the OpenAI
+Python SDK (openai>=2.53.0,<2.54) for the DeepSeek OpenAI-compatible API.
 
 .env.example
-Example environment-variable configuration. Contains placeholders only and
-does not contain production secrets.
+Example environment-variable configuration, including DEEPSEEK_API_KEY and
+DEEPSEEK_MODEL=deepseek-flash. Contains placeholders only and no production
+secrets. Variables must be injected into the process environment; the application
+does not automatically load .env files.
 
 README.md
 Project overview, design principles, technology stack, feature description,

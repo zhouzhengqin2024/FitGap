@@ -28,7 +28,8 @@ Bootstrap
 Limited JavaScript
 
 External AI Service:
-Google Gemini API
+DeepSeek OpenAI-compatible API
+OpenAI Python SDK
 
 Production Components:
 Gunicorn
@@ -45,7 +46,7 @@ Current direct dependencies include:
 asgiref==3.12.1
 dj-database-url==3.0.1
 Django==6.0.7
-google-genai>=1.0.0
+openai>=2.53.0,<2.54
 gunicorn==23.0.0
 psycopg==3.3.2
 pypdf==6.15.0
@@ -89,12 +90,19 @@ DJANGO_SECURE_HSTS_SECONDS
 DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS
 DJANGO_SECURE_HSTS_PRELOAD
 DATABASE_URL
-GEMINI_API_KEY
+DEEPSEEK_API_KEY
+DEEPSEEK_MODEL
 
 The .env.example file contains placeholder values only.
 
-A real Gemini API key is required for Gemini-assisted prioritisation and
-learning-roadmap generation.
+A real DEEPSEEK_API_KEY is required for DeepSeek-based prioritisation,
+low-coverage AI-assisted prioritisation, and DeepSeek-generated learning roadmaps.
+Set DEEPSEEK_MODEL=deepseek-flash; this is also the code default when unset.
+The OpenAI Python SDK connects to https://api.deepseek.com with the DeepSeek key.
+
+Inject these variables into the process environment before starting Django.
+The application does not automatically load .env files, so copying .env.example
+alone does not configure the running process. Do not put real keys in source files.
 
 No production API keys, passwords or other secrets are included in the
 submission package.
@@ -140,11 +148,14 @@ Run:
 
 python manage.py test
 
-The final project test suite contains 333 passing automated tests.
+The latest full test run after the DeepSeek migration passed 345 tests,
+including 69 AI service and boundary tests. The original submission passed
+333 automated tests.
 
-Some functionality involving external Gemini requests may require a valid
-GEMINI_API_KEY and network access, while tests use appropriate isolation or
-mocking where implemented.
+Live AI functionality requires DEEPSEEK_API_KEY and network access. Automated
+AI tests use SDK mocks or a local HTTP mock transport and require neither a real
+API key nor external AI requests. Local real-API validation has confirmed both
+prioritisation and learning-roadmap generation work with DeepSeek.
 
 10. Production Deployment
 -------------------------
@@ -157,6 +168,14 @@ PostgreSQL
 
 Production-sensitive settings are supplied through environment variables rather
 than hard-coded credentials.
+
+To deploy the current DeepSeek integration, install the current requirements
+(including the OpenAI Python SDK) and supply DEEPSEEK_API_KEY and
+DEEPSEEK_MODEL=deepseek-flash to the application service. AI requests use a
+45-second SDK timeout, max_retries=0 and non-streaming JSON mode. Check the
+production worker timeout against the expected request duration before rollout.
+The DeepSeek migration has been validated locally; Railway has not yet been
+updated as part of this migration.
 
 Live application at the time of submission:
 

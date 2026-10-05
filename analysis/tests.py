@@ -3,6 +3,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -27,8 +28,9 @@ from .ai_learning_roadmap import (
 )
 from .ai_prioritisation import (
     AIPrioritisationUnavailable,
-    GEMINI_MODEL,
-    GEMINI_TIMEOUT_MS,
+    DEEPSEEK_MODEL,
+    DEEPSEEK_TIMEOUT_SECONDS,
+    PRIORITISATION_RESPONSE_SCHEMA,
     build_ai_gap_input,
     prioritise_low_coverage_analysis,
     prioritise_skill_gaps,
@@ -46,6 +48,13 @@ from .services import (
     generate_learning_recommendations,
 )
 from .translations import SUPPORTED_LANGUAGE_OPTIONS
+
+
+def _chat_response(content, finish_reason='stop'):
+    return SimpleNamespace(choices=[SimpleNamespace(
+        message=SimpleNamespace(content=content),
+        finish_reason=finish_reason,
+    )])
 
 
 def _uploaded_file(name, content, content_type='application/octet-stream'):
@@ -962,8 +971,8 @@ class SkillEvidenceTests(SimpleTestCase):
 
 
 class AIPrioritisationServiceTests(SimpleTestCase):
-    def test_shared_gemini_timeout_is_45_seconds(self):
-        self.assertEqual(GEMINI_TIMEOUT_MS, 45000)
+    def test_shared_deepseek_timeout_is_45_seconds(self):
+        self.assertEqual(DEEPSEEK_TIMEOUT_SECONDS, 45)
 
     def test_build_ai_gap_input_uses_verified_missing_skill_evidence_only(self):
         gap_input = build_ai_gap_input([
@@ -1051,18 +1060,18 @@ class AIPrioritisationServiceTests(SimpleTestCase):
             })
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_missing_gemini_api_key_triggers_fallback_exception(self):
+    def test_missing_deepseek_api_key_triggers_fallback_exception(self):
         with self.assertRaises(AIPrioritisationUnavailable):
             prioritise_skill_gaps([{'skill': 'Django', 'jd_evidence': [], 'cv_evidence': []}], 'en')
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_prioritisation.genai')
-    def test_gemini_generate_content_is_called_with_structured_output(self, mock_genai):
-        class FakeResponse:
-            text = '{"priorities":[{"skill":"Django","priority":"high","reason":"Django is required."}]}'
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.OpenAI')
+    def test_deepseek_chat_completion_is_called_with_json_output(self, mock_openai):
+        response = _chat_response('{"priorities":[{"skill":"Django","priority":"high","reason":"Django is required."}]}')
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.return_value = FakeResponse()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.return_value = response
 
         result = prioritise_skill_gaps([
             {
@@ -1072,25 +1081,27 @@ class AIPrioritisationServiceTests(SimpleTestCase):
             },
         ], 'en')
 
-        mock_genai.Client.assert_called_once_with(
+        mock_openai.assert_called_once_with(
             api_key='test-key',
-            http_options={'timeout': GEMINI_TIMEOUT_MS},
+            base_url='https://api.deepseek.com',
+            timeout=45,
+            max_retries=0,
         )
-        call_kwargs = mock_client.models.generate_content.call_args.kwargs
-        self.assertEqual(call_kwargs['model'], GEMINI_MODEL)
-        self.assertEqual(call_kwargs['config']['response_mime_type'], 'application/json')
-        self.assertIn('response_json_schema', call_kwargs['config'])
-        self.assertIn('Django is required.', call_kwargs['contents'])
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        self.assertEqual(call_kwargs['model'], DEEPSEEK_MODEL)
+        self.assertEqual(call_kwargs['response_format'], {'type': 'json_object'})
+        self.assertIn('JSON schema:', call_kwargs['messages'][0]['content'])
+        self.assertIn('Django is required.', call_kwargs['messages'][1]['content'])
         self.assertEqual(result[0]['skill'], 'Django')
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_prioritisation.genai')
-    def test_low_coverage_prioritisation_receives_cv_and_job_description(self, mock_genai):
-        class FakeResponse:
-            text = '{"priorities":[{"skill":"Conservation planning","priority":"high","reason":"The JD emphasises planning experience."}]}'
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.OpenAI')
+    def test_low_coverage_prioritisation_receives_cv_and_job_description(self, mock_openai):
+        response = _chat_response('{"priorities":[{"skill":"Conservation planning","priority":"high","reason":"The JD emphasises planning experience."}]}')
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.return_value = FakeResponse()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.return_value = response
 
         result = prioritise_low_coverage_analysis(
             'Museum assistant with public engagement experience.',
@@ -1098,26 +1109,28 @@ class AIPrioritisationServiceTests(SimpleTestCase):
             'en',
         )
 
-        mock_genai.Client.assert_called_once_with(
+        mock_openai.assert_called_once_with(
             api_key='test-key',
-            http_options={'timeout': GEMINI_TIMEOUT_MS},
+            base_url='https://api.deepseek.com',
+            timeout=45,
+            max_retries=0,
         )
-        call_kwargs = mock_client.models.generate_content.call_args.kwargs
-        self.assertEqual(call_kwargs['model'], GEMINI_MODEL)
-        self.assertIn('low_coverage_ai', call_kwargs['contents'])
-        self.assertIn('Museum assistant with public engagement experience.', call_kwargs['contents'])
-        self.assertIn('conservation planning and archive coordination', call_kwargs['contents'])
-        self.assertIn('not deterministic missing skills', call_kwargs['contents'])
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        self.assertEqual(call_kwargs['model'], DEEPSEEK_MODEL)
+        self.assertIn('low_coverage_ai', call_kwargs['messages'][1]['content'])
+        self.assertIn('Museum assistant with public engagement experience.', call_kwargs['messages'][1]['content'])
+        self.assertIn('conservation planning and archive coordination', call_kwargs['messages'][1]['content'])
+        self.assertIn('not deterministic missing skills', call_kwargs['messages'][1]['content'])
         self.assertEqual(result[0]['skill'], 'Conservation planning')
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_prioritisation.genai')
-    def test_ai_prioritisation_logs_success_with_elapsed_time(self, mock_genai):
-        class FakeResponse:
-            text = '{"priorities":[{"skill":"Django","priority":"high","reason":"Django is required."}]}'
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.OpenAI')
+    def test_ai_prioritisation_logs_success_with_elapsed_time(self, mock_openai):
+        response = _chat_response('{"priorities":[{"skill":"Django","priority":"high","reason":"Django is required."}]}')
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.return_value = FakeResponse()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.return_value = response
 
         with self.assertLogs('analysis.ai_prioritisation', level='INFO') as logs:
             priorities = prioritise_skill_gaps([
@@ -1130,16 +1143,17 @@ class AIPrioritisationServiceTests(SimpleTestCase):
 
         self.assertEqual(priorities[0]['skill'], 'Django')
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Gemini call #1 prioritisation succeeded: elapsed_ms=', logged_output)
+        self.assertIn('DeepSeek call #1 prioritisation succeeded: elapsed_ms=', logged_output)
         self.assertIn('result_count=1', logged_output)
         self.assertNotIn('Django is required.', logged_output)
         self.assertNotIn('test-key', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_prioritisation.genai')
-    def test_ai_prioritisation_timeout_logs_safe_category(self, mock_genai):
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = TimeoutError('request timed out with test-key')
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.OpenAI')
+    def test_ai_prioritisation_timeout_logs_safe_category(self, mock_openai):
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = TimeoutError('request timed out with test-key')
 
         with self.assertLogs('analysis.ai_prioritisation', level='WARNING') as logs:
             with self.assertRaises(AIPrioritisationUnavailable):
@@ -1152,22 +1166,22 @@ class AIPrioritisationServiceTests(SimpleTestCase):
                 ], 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Gemini call #1 prioritisation failed: category=timeout', logged_output)
+        self.assertIn('DeepSeek call #1 prioritisation failed: category=timeout', logged_output)
         self.assertIn('exception=TimeoutError', logged_output)
         self.assertIn('elapsed_ms=', logged_output)
         self.assertNotIn('Django is required.', logged_output)
         self.assertNotIn('test-key', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_prioritisation.genai')
-    def test_ai_prioritisation_client_error_logs_safe_api_metadata(self, mock_genai):
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.OpenAI')
+    def test_ai_prioritisation_client_error_logs_safe_api_metadata(self, mock_openai):
         class FakeClientError(Exception):
-            code = 429
-            status = 'RESOURCE_EXHAUSTED'
+            status_code = 429
             message = 'Quota exceeded for this project.'
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = FakeClientError()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = FakeClientError()
 
         with self.assertLogs('analysis.ai_prioritisation', level='WARNING') as logs:
             with self.assertRaises(AIPrioritisationUnavailable):
@@ -1180,23 +1194,22 @@ class AIPrioritisationServiceTests(SimpleTestCase):
                 ], 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Gemini call #1 prioritisation failed: category=api_exception exception=FakeClientError', logged_output)
-        self.assertIn('code=429', logged_output)
-        self.assertIn('status=RESOURCE_EXHAUSTED', logged_output)
-        self.assertIn('message="Quota exceeded for this project."', logged_output)
+        self.assertIn('DeepSeek call #1 prioritisation failed: category=api_exception exception=FakeClientError', logged_output)
+        self.assertIn('status=429', logged_output)
+        self.assertNotIn('Quota exceeded for this project.', logged_output)
         self.assertNotIn('Django is required.', logged_output)
         self.assertNotIn('test-key', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_prioritisation.genai')
-    def test_ai_prioritisation_client_error_omits_message_with_raw_evidence(self, mock_genai):
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.OpenAI')
+    def test_ai_prioritisation_client_error_omits_message_with_raw_evidence(self, mock_openai):
         class FakeClientError(Exception):
-            code = 400
-            status = 'INVALID_ARGUMENT'
+            status_code = 400
             message = 'Invalid request included Django is required for this role.'
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = FakeClientError()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = FakeClientError()
 
         with self.assertLogs('analysis.ai_prioritisation', level='WARNING') as logs:
             with self.assertRaises(AIPrioritisationUnavailable):
@@ -1209,21 +1222,20 @@ class AIPrioritisationServiceTests(SimpleTestCase):
                 ], 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('code=400', logged_output)
-        self.assertIn('status=INVALID_ARGUMENT', logged_output)
-        self.assertIn('[omitted unsafe or overly long API message]', logged_output)
+        self.assertIn('status=400', logged_output)
+        self.assertNotIn('Invalid request included', logged_output)
         self.assertNotIn('Django is required for this role.', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_prioritisation.genai')
-    def test_low_coverage_client_error_does_not_log_cv_or_jd_text(self, mock_genai):
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_prioritisation.OpenAI')
+    def test_low_coverage_client_error_does_not_log_cv_or_jd_text(self, mock_openai):
         class FakeClientError(Exception):
-            code = 400
-            status = 'INVALID_ARGUMENT'
+            status_code = 400
             message = 'Invalid request included Museum assistant with public engagement.'
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = FakeClientError()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = FakeClientError()
 
         with self.assertLogs('analysis.ai_prioritisation', level='WARNING') as logs:
             with self.assertRaises(AIPrioritisationUnavailable):
@@ -1234,10 +1246,9 @@ class AIPrioritisationServiceTests(SimpleTestCase):
                 )
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Gemini call #1 low-coverage prioritisation failed: category=api_exception', logged_output)
-        self.assertIn('code=400', logged_output)
-        self.assertIn('status=INVALID_ARGUMENT', logged_output)
-        self.assertIn('[omitted unsafe or overly long API message]', logged_output)
+        self.assertIn('DeepSeek call #1 low-coverage prioritisation failed: category=api_exception', logged_output)
+        self.assertIn('status=400', logged_output)
+        self.assertNotIn('Invalid request included', logged_output)
         self.assertNotIn('Museum assistant with public engagement.', logged_output)
         self.assertNotIn('The role involves conservation planning.', logged_output)
         self.assertNotIn('test-key', logged_output)
@@ -1572,7 +1583,7 @@ class LearningRoadmapServiceTests(SimpleTestCase):
             validate_learning_roadmap(roadmap, ['Django'])
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_missing_gemini_api_key_triggers_roadmap_fallback_exception(self):
+    def test_missing_deepseek_api_key_triggers_roadmap_fallback_exception(self):
         with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
             with self.assertRaises(LearningRoadmapUnavailable):
                 generate_learning_roadmap({
@@ -1585,18 +1596,18 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }, 'en')
 
         self.assertIn(
-            'Learning roadmap unavailable: missing API key or Gemini SDK unavailable',
+            'Learning roadmap unavailable: missing API key or DeepSeek SDK unavailable',
             '\n'.join(logs.output),
         )
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_learning_roadmap.genai')
-    def test_learning_roadmap_logs_validation_failure_reason_safely(self, mock_genai):
-        class FakeResponse:
-            text = '{"summary":{},"skills":[]}'
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.OpenAI')
+    def test_learning_roadmap_logs_validation_failure_reason_safely(self, mock_openai):
+        response = _chat_response('{"summary":{},"skills":[]}')
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.return_value = FakeResponse()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.return_value = response
 
         with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
             with self.assertRaises(LearningRoadmapUnavailable):
@@ -1614,18 +1625,18 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }, 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Learning roadmap validation failed: skills is empty', logged_output)
+        self.assertIn('Learning roadmap validation failed', logged_output)
         self.assertNotIn('Django is required.', logged_output)
         self.assertNotIn('test-key', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_learning_roadmap.genai')
-    def test_learning_roadmap_json_failure_does_not_log_raw_response(self, mock_genai):
-        class FakeResponse:
-            text = 'not json with raw private CV details'
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.OpenAI')
+    def test_learning_roadmap_json_failure_does_not_log_raw_response(self, mock_openai):
+        response = _chat_response('not json with raw private CV details')
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.return_value = FakeResponse()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.return_value = response
 
         with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
             with self.assertRaises(LearningRoadmapUnavailable):
@@ -1642,11 +1653,12 @@ class LearningRoadmapServiceTests(SimpleTestCase):
         self.assertIn('Learning roadmap JSON parsing failed: JSONDecodeError', logged_output)
         self.assertNotIn('raw private CV details', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_learning_roadmap.genai')
-    def test_learning_roadmap_sdk_failure_does_not_log_exception_payload(self, mock_genai):
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = RuntimeError('private JD payload test-key')
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.OpenAI')
+    def test_learning_roadmap_sdk_failure_does_not_log_exception_payload(self, mock_openai):
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = RuntimeError('private JD payload test-key')
 
         with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
             with self.assertRaises(LearningRoadmapUnavailable):
@@ -1661,23 +1673,23 @@ class LearningRoadmapServiceTests(SimpleTestCase):
 
         logged_output = '\n'.join(logs.output)
         self.assertIn(
-            'Gemini call #2 learning roadmap failed: category=api_exception exception=RuntimeError',
+            'DeepSeek call #2 learning roadmap failed: category=api_exception exception=RuntimeError',
             logged_output,
         )
-        self.assertIn('code=unknown status=unknown message="unavailable"', logged_output)
+        self.assertIn('status=unknown', logged_output)
         self.assertNotIn('private JD payload', logged_output)
         self.assertNotIn('test-key', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_learning_roadmap.genai')
-    def test_learning_roadmap_client_error_logs_safe_api_metadata(self, mock_genai):
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.OpenAI')
+    def test_learning_roadmap_client_error_logs_safe_api_metadata(self, mock_openai):
         class FakeClientError(Exception):
-            code = 400
-            status = 'INVALID_ARGUMENT'
-            message = 'Invalid response_json_schema: unsupported field additionalProperties.'
+            status_code = 400
+            message = 'Invalid response_format for private request.'
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = FakeClientError()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = FakeClientError()
 
         with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
             with self.assertRaises(LearningRoadmapUnavailable):
@@ -1695,23 +1707,22 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }, 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Gemini call #2 learning roadmap failed: category=api_exception exception=FakeClientError', logged_output)
-        self.assertIn('code=400', logged_output)
-        self.assertIn('status=INVALID_ARGUMENT', logged_output)
-        self.assertIn('Invalid response_json_schema: unsupported field additionalProperties.', logged_output)
+        self.assertIn('DeepSeek call #2 learning roadmap failed: category=api_exception exception=FakeClientError', logged_output)
+        self.assertIn('status=400', logged_output)
+        self.assertNotIn('Invalid response_format for private request.', logged_output)
         self.assertNotIn('test-key', logged_output)
         self.assertNotIn('Django is required.', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_learning_roadmap.genai')
-    def test_learning_roadmap_client_error_omits_message_with_raw_evidence(self, mock_genai):
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.OpenAI')
+    def test_learning_roadmap_client_error_omits_message_with_raw_evidence(self, mock_openai):
         class FakeClientError(Exception):
-            code = 400
-            status = 'INVALID_ARGUMENT'
+            status_code = 400
             message = 'Invalid request included Django is required for this role.'
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = FakeClientError()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = FakeClientError()
 
         with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
             with self.assertRaises(LearningRoadmapUnavailable):
@@ -1729,21 +1740,20 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }, 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('code=400', logged_output)
-        self.assertIn('status=INVALID_ARGUMENT', logged_output)
-        self.assertIn('[omitted unsafe or overly long API message]', logged_output)
+        self.assertIn('status=400', logged_output)
+        self.assertNotIn('Invalid request included', logged_output)
         self.assertNotIn('Django is required for this role.', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_learning_roadmap.genai')
-    def test_learning_roadmap_client_error_redacts_personal_identifiers(self, mock_genai):
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.OpenAI')
+    def test_learning_roadmap_client_error_redacts_personal_identifiers(self, mock_openai):
         class FakeClientError(Exception):
-            code = 400
-            status = 'INVALID_ARGUMENT'
+            status_code = 400
             message = 'Invalid schema for ada@example.com and +44 7700 900123.'
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = FakeClientError()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = FakeClientError()
 
         with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
             with self.assertRaises(LearningRoadmapUnavailable):
@@ -1757,19 +1767,18 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }, 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('[redacted-email]', logged_output)
-        self.assertIn('[redacted-phone]', logged_output)
+        self.assertIn('status=400', logged_output)
         self.assertNotIn('ada@example.com', logged_output)
         self.assertNotIn('+44 7700 900123', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_learning_roadmap.genai')
-    def test_learning_roadmap_uses_configured_timeout_and_logs_success(self, mock_genai):
-        class FakeResponse:
-            text = json.dumps(_sample_roadmap(['Django']))
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.OpenAI')
+    def test_learning_roadmap_uses_configured_timeout_and_logs_success(self, mock_openai):
+        response = _chat_response(json.dumps(_sample_roadmap(['Django'])))
 
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.return_value = FakeResponse()
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.return_value = response
 
         with self.assertLogs('analysis.ai_learning_roadmap', level='INFO') as logs:
             roadmap = generate_learning_roadmap({
@@ -1785,22 +1794,25 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }],
             }, 'en')
 
-        mock_genai.Client.assert_called_once_with(
+        mock_openai.assert_called_once_with(
             api_key='test-key',
-            http_options={'timeout': GEMINI_TIMEOUT_MS},
+            base_url='https://api.deepseek.com',
+            timeout=45,
+            max_retries=0,
         )
         self.assertEqual(roadmap['skills'][0]['skill'], 'Django')
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Gemini call #2 learning roadmap succeeded: elapsed_ms=', logged_output)
+        self.assertIn('DeepSeek call #2 learning roadmap succeeded: elapsed_ms=', logged_output)
         self.assertIn('result_count=1', logged_output)
         self.assertNotIn('Django is required.', logged_output)
         self.assertNotIn('test-key', logged_output)
 
-    @patch.dict(os.environ, {'GEMINI_API_KEY': 'test-key'}, clear=True)
-    @patch('analysis.ai_learning_roadmap.genai')
-    def test_learning_roadmap_timeout_logs_safe_category(self, mock_genai):
-        mock_client = mock_genai.Client.return_value
-        mock_client.models.generate_content.side_effect = TimeoutError('request timed out with test-key')
+    @patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+    @patch('analysis.ai_learning_roadmap.OpenAI')
+    def test_learning_roadmap_timeout_logs_safe_category(self, mock_openai):
+        mock_client = mock_openai.return_value
+        mock_client.__enter__.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = TimeoutError('request timed out with test-key')
 
         with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
             with self.assertRaises(LearningRoadmapUnavailable):
@@ -1818,11 +1830,201 @@ class LearningRoadmapServiceTests(SimpleTestCase):
                 }, 'en')
 
         logged_output = '\n'.join(logs.output)
-        self.assertIn('Gemini call #2 learning roadmap failed: category=timeout', logged_output)
+        self.assertIn('DeepSeek call #2 learning roadmap failed: category=timeout', logged_output)
         self.assertIn('exception=TimeoutError', logged_output)
         self.assertIn('elapsed_ms=', logged_output)
         self.assertNotIn('Django is required.', logged_output)
         self.assertNotIn('test-key', logged_output)
+
+
+@patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-key'}, clear=True)
+class DeepSeekBoundaryTests(SimpleTestCase):
+    def setUp(self):
+        self.priorities = [{'skill': 'Django', 'priority': 'high', 'reason': '需要后端技能。'}]
+        self.gaps = [{'skill': 'Django', 'jd_evidence': [{'excerpt': 'Private JD evidence.'}]}]
+        self.results = {
+            'analysis_mode': 'low_coverage_ai',
+            'cv_skills': ['Python'],
+            'missing_skill_details': self.gaps,
+            'ai_prioritisation': {'status': 'success', 'priorities': self.priorities},
+            'low_coverage_source': {'cv_text': 'Private CV text.', 'job_description_text': 'Private JD text.'},
+        }
+        self.cases = [
+            ('analysis.ai_prioritisation', prioritise_skill_gaps, (self.gaps, 'zh'),
+             AIPrioritisationUnavailable, {'priorities': self.priorities}, PRIORITISATION_RESPONSE_SCHEMA),
+            ('analysis.ai_prioritisation', prioritise_low_coverage_analysis,
+             ('Private CV text.', 'Private JD text.', 'zh'), AIPrioritisationUnavailable,
+             {'priorities': self.priorities}, PRIORITISATION_RESPONSE_SCHEMA),
+            ('analysis.ai_learning_roadmap', generate_learning_roadmap, (self.results, 'zh'),
+             LearningRoadmapUnavailable, _sample_roadmap(['Django']), ROADMAP_RESPONSE_SCHEMA),
+        ]
+
+    def _assert_response_unavailable(self, response):
+        for module, function, args, exception, _, _ in self.cases:
+            with self.subTest(function=function.__name__), patch(module + '.OpenAI') as factory:
+                client = factory.return_value.__enter__.return_value
+                client.chat.completions.create.return_value = response
+                with self.assertLogs(module, level='WARNING') as logs:
+                    with self.assertRaises(exception):
+                        function(*args)
+                client.chat.completions.create.assert_called_once()
+                factory.return_value.__exit__.assert_called_once()
+                output = '\n'.join(logs.output)
+                for private in ('test-key', 'Private CV', 'Private JD', 'RAW_RESPONSE_MARKER'):
+                    self.assertNotIn(private, output)
+
+    def test_all_three_requests_preserve_contract_and_explicit_configuration(self):
+        for module, function, args, _, data, schema in self.cases:
+            with self.subTest(function=function.__name__), patch(module + '.OpenAI') as factory:
+                client = factory.return_value.__enter__.return_value
+                client.chat.completions.create.return_value = _chat_response(json.dumps(data, ensure_ascii=False))
+                result = function(*args)
+                self.assertEqual(result, data if 'skills' in data else data['priorities'])
+                factory.assert_called_once_with(
+                    api_key='test-key', base_url='https://api.deepseek.com', timeout=45, max_retries=0,
+                )
+                client.chat.completions.create.assert_called_once()
+                kwargs = client.chat.completions.create.call_args.kwargs
+                self.assertEqual(kwargs['model'], DEEPSEEK_MODEL)
+                self.assertEqual(kwargs['response_format'], {'type': 'json_object'})
+                self.assertIs(kwargs['stream'], False)
+                self.assertEqual(kwargs['extra_body'], {'thinking': {'type': 'disabled'}})
+                self.assertEqual(kwargs['max_tokens'], 8192 if 'skills' in data else 2048)
+                instructions = kwargs['messages'][0]['content']
+                self.assertEqual(kwargs['messages'][0]['role'], 'system')
+                self.assertIn('only one JSON object', instructions)
+                self.assertIn('without Markdown code fences', instructions)
+                self.assertIn('Simplified Chinese', instructions)
+                self.assertIn('English', instructions)
+                self.assertEqual(json.loads(instructions.split('JSON schema: ')[1]), schema)
+                if 'skills' in data:
+                    for limit in ('1-3 unique skills', '320 characters', '0-1', '1-8', '1-6', '1-4'):
+                        self.assertIn(limit, instructions)
+                    self.assertIn('Private CV text.', kwargs['messages'][1]['content'])
+                else:
+                    self.assertIn('1-3 unique priorities', instructions)
+
+    @patch.dict(os.environ, {'DEEPSEEK_MODEL': 'deepseek-v4-pro'})
+    def test_model_can_be_overridden_for_all_three_requests(self):
+        for module, function, args, _, data, _ in self.cases:
+            with self.subTest(function=function.__name__), patch(module + '.OpenAI') as factory:
+                client = factory.return_value.__enter__.return_value
+                client.chat.completions.create.return_value = _chat_response(json.dumps(data))
+                function(*args)
+                self.assertEqual(client.chat.completions.create.call_args.kwargs['model'], 'deepseek-v4-pro')
+
+    def test_empty_choices_trigger_fallback(self):
+        self._assert_response_unavailable(SimpleNamespace(choices=[]))
+
+    def test_empty_content_triggers_fallback(self):
+        for content in (None, '', '  ', {'unexpected': 'object'}):
+            with self.subTest(content=content):
+                self._assert_response_unavailable(_chat_response(content))
+
+    def test_missing_message_triggers_fallback(self):
+        self._assert_response_unavailable(SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop')]))
+
+    def test_invalid_json_is_not_repaired_or_logged(self):
+        for content in ('RAW_RESPONSE_MARKER Private CV test-key', '```json\n{}\n```'):
+            with self.subTest(content=content):
+                self._assert_response_unavailable(_chat_response(content))
+
+    def test_truncated_or_aborted_responses_are_rejected_even_with_valid_json(self):
+        for reason in ('length', 'content_filter', 'insufficient_system_resource', 'aborted', 'tool_calls', None):
+            for module, function, args, exception, data, _ in self.cases:
+                with self.subTest(reason=reason, function=function.__name__), patch(module + '.OpenAI') as factory:
+                    factory.return_value.__enter__.return_value.chat.completions.create.return_value = (
+                        _chat_response(json.dumps(data), reason)
+                    )
+                    with self.assertLogs(module, level='WARNING'), self.assertRaises(exception):
+                        function(*args)
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_missing_key_never_constructs_client(self):
+        for module, function, args, exception, _, _ in self.cases:
+            with self.subTest(function=function.__name__), patch(module + '.OpenAI') as factory:
+                with self.assertLogs(module, level='WARNING'), self.assertRaises(exception):
+                    function(*args)
+                factory.assert_not_called()
+
+    def test_missing_sdk_triggers_existing_fallback(self):
+        for module, function, args, exception, _, _ in self.cases:
+            with self.subTest(function=function.__name__), patch(module + '.OpenAI', None):
+                with self.assertLogs(module, level='WARNING'), self.assertRaises(exception):
+                    function(*args)
+
+    def test_initialisation_and_request_errors_never_log_provider_payloads(self):
+        class PrivateError(Exception):
+            status_code = 400
+            message = 'test-key Private CV text. Private JD text. Ada Lovelace ada@example.com'
+            body = {'error': message}
+            code = message
+
+        for phase in ('initialisation', 'request'):
+            for module, function, args, exception, _, _ in self.cases:
+                with self.subTest(phase=phase, function=function.__name__), patch(module + '.OpenAI') as factory:
+                    error = PrivateError(PrivateError.message)
+                    if phase == 'initialisation':
+                        factory.side_effect = error
+                    else:
+                        factory.return_value.__enter__.return_value.chat.completions.create.side_effect = error
+                    with self.assertLogs(module, level='WARNING') as logs, self.assertRaises(exception):
+                        function(*args)
+                    output = '\n'.join(logs.output)
+                    self.assertIn('status=400', output)
+                    for private in ('test-key', 'Private CV', 'Private JD', 'Ada Lovelace', 'ada@example.com'):
+                        self.assertNotIn(private, output)
+
+    def test_validation_error_does_not_log_user_supplied_skill(self):
+        private_skill = 'Private CV text. test-key'
+        self.results['ai_prioritisation']['priorities'][0]['skill'] = private_skill
+        data = _sample_roadmap([private_skill])
+        data['skills'].append(data['skills'][0])
+        with patch('analysis.ai_learning_roadmap.OpenAI') as factory:
+            factory.return_value.__enter__.return_value.chat.completions.create.return_value = (
+                _chat_response(json.dumps(data))
+            )
+            with self.assertLogs('analysis.ai_learning_roadmap', level='WARNING') as logs:
+                with self.assertRaises(LearningRoadmapUnavailable):
+                    generate_learning_roadmap(self.results)
+            self.assertNotIn(private_skill, '\n'.join(logs.output))
+
+    def test_installed_sdk_serializes_and_parses_all_three_requests_without_network(self):
+        import httpx
+        from openai import OpenAI as SDKClient
+
+        for module, function, args, _, data, _ in self.cases:
+            with self.subTest(function=function.__name__):
+                requests = []
+
+                def respond(request):
+                    requests.append(request)
+                    return httpx.Response(200, json={
+                        'id': 'test-completion', 'object': 'chat.completion', 'created': 0,
+                        'model': DEEPSEEK_MODEL,
+                        'choices': [{'index': 0, 'finish_reason': 'stop', 'message': {
+                            'role': 'assistant', 'content': json.dumps(data, ensure_ascii=False),
+                        }}],
+                    })
+
+                transport = httpx.Client(transport=httpx.MockTransport(respond))
+
+                def make_client(**kwargs):
+                    return SDKClient(**kwargs, http_client=transport)
+
+                with patch(module + '.OpenAI', side_effect=make_client):
+                    result = function(*args)
+                self.assertEqual(result, data if 'skills' in data else data['priorities'])
+                self.assertEqual(len(requests), 1)
+                request = requests[0]
+                self.assertEqual(str(request.url), 'https://api.deepseek.com/chat/completions')
+                self.assertEqual(request.headers['authorization'], 'Bearer test-key')
+                body = json.loads(request.content)
+                self.assertEqual(body['response_format'], {'type': 'json_object'})
+                self.assertEqual(body['thinking'], {'type': 'disabled'})
+                self.assertFalse(body['stream'])
+                self.assertEqual(request.extensions['timeout']['read'], 45)
+                self.assertTrue(transport.is_closed)
 
 
 class InterfaceLanguageTests(TestCase):

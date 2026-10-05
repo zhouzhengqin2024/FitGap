@@ -12,6 +12,8 @@ Production deployment:
 
 https://fitgap-ai.up.railway.app/
 
+The current code uses DeepSeek through the OpenAI Python SDK. The migrated flow has been validated locally with the real DeepSeek API; the Railway deployment has not been updated as part of this migration yet.
+
 ---
 
 ## Core Features
@@ -23,9 +25,9 @@ https://fitgap-ai.up.railway.app/
 - Matched and missing skill identification
 - Evidence-based skill-gap explanation
 - Explainable match score
-- Gemini-assisted skill prioritisation
-- Gemini-assisted personalised learning roadmap
-- Low-coverage AI fallback
+- DeepSeek-based prioritisation of verified skill gaps
+- Low-coverage AI-assisted prioritisation when no structured JD skills are recognised
+- DeepSeek-generated personalised learning roadmap
 - User authentication
 - Saved analysis history
 - PDF roadmap export
@@ -42,10 +44,13 @@ A central design principle of FitGap is:
 
 Skill matching, recognised evidence and match-score calculation are primarily handled using deterministic logic.
 
-Gemini is used for higher-level decision support, including:
+DeepSeek is used for higher-level decision support, including:
 
-1. prioritising identified skill gaps; and
-2. generating personalised learning roadmaps.
+1. prioritising identified skill gaps;
+2. suggesting candidate learning priorities when no structured JD skills are recognised; and
+3. generating personalised learning roadmaps.
+
+Low-coverage AI suggestions do not replace deterministic matching results. AI output is parsed as JSON and checked by local business validators before use.
 
 This separation was chosen to improve explainability, predictability and testability while reducing reliance on generative AI for factual matching.
 
@@ -59,7 +64,8 @@ This separation was chosen to improve explainability, predictability and testabi
 - Bootstrap
 - SQLite for local development
 - PostgreSQL for production
-- Google Gemini API
+- DeepSeek OpenAI-compatible API
+- OpenAI Python SDK (`openai>=2.53.0,<2.54`)
 - ReportLab
 - Gunicorn
 - WhiteNoise
@@ -81,8 +87,8 @@ Important modules include:
 - `skill_catalogue.py` — canonical skills and aliases
 - `skill_candidates.py` — skill candidate identification
 - `skill_normalisation.py` — skill normalisation logic
-- `ai_prioritisation.py` — Gemini Call #1 for skill-gap prioritisation
-- `ai_learning_roadmap.py` — Gemini Call #2 for learning-roadmap generation
+- `ai_prioritisation.py` — two DeepSeek request paths: verified skill-gap prioritisation and low-coverage AI-assisted prioritisation
+- `ai_learning_roadmap.py` — one DeepSeek request path for learning-roadmap generation
 - `pdf_export.py` — PDF generation from saved analysis results
 - `tests.py` — automated test suite
 
@@ -98,6 +104,19 @@ Contains Django project-level configuration, including:
 ### `requirements.txt`
 
 Lists Python dependencies required by the project.
+
+---
+
+## Current AI Configuration
+
+Install the dependencies from `requirements.txt`. The application connects to `https://api.deepseek.com` using the OpenAI Python SDK and reads these process environment variables:
+
+- `DEEPSEEK_API_KEY` — required for AI requests; inject a real key securely into the local or production process environment.
+- `DEEPSEEK_MODEL` — model selection; `.env.example` specifies `deepseek-flash`, which is also the code default when this variable is unset.
+
+`.env.example` contains placeholders only. The application does not automatically load `.env` files; copying the example alone does not inject environment variables. For production deployment, supply the same DeepSeek variables to the application service and install the current requirements.
+
+Requests use Chat Completions JSON mode, a 45-second SDK timeout, zero automatic retries, and non-streaming responses. Existing fallback behaviour preserves deterministic results and previously generated priorities when AI is unavailable.
 
 ---
 
@@ -162,6 +181,8 @@ Important later iterations included:
 - PostgreSQL production database;
 - cross-platform PDF compatibility improvements.
 
+The Gemini references above describe the historical implementation. The current integration has since migrated to DeepSeek through the OpenAI-compatible API, preserving the existing business contracts and deterministic analysis.
+
 Cross-domain testing exposed limitations in the original IT-focused skill catalogue, which led to redesign of the skill extraction and normalisation approach.
 
 Further testing also showed that a job description with very low deterministic skill coverage should not be treated as a genuine zero match. A separate low-coverage AI-assisted workflow was therefore introduced.
@@ -170,9 +191,11 @@ Further testing also showed that a job description with very low deterministic s
 
 ## Testing
 
-The final automated test suite contains:
+The latest full automated test run after the DeepSeek migration passed:
 
-**333 passing tests**
+**345 tests**, including **69 AI service and boundary tests**. The original submission had 333 passing tests.
+
+AI tests use SDK mocks or a local HTTP mock transport and do not require a real API key or external AI requests. The real DeepSeek API has also been validated locally for prioritisation and learning-roadmap generation.
 
 Run the test suite with:
 
