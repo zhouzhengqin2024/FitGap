@@ -117,8 +117,18 @@ def validate_ai_priorities(response_data, verified_missing_skills):
             raise AIPrioritisationUnavailable
 
         skill = item.get('skill')
-        priority = str(item.get('priority', '')).strip().lower()
-        reason = str(item.get('reason', '')).strip()
+        priority = item.get('priority')
+        reason = item.get('reason')
+
+        if not isinstance(skill, str) or not skill.strip():
+            raise AIPrioritisationUnavailable
+        if not isinstance(priority, str) or not priority.strip():
+            raise AIPrioritisationUnavailable
+        if not isinstance(reason, str) or not reason.strip():
+            raise AIPrioritisationUnavailable
+
+        priority = priority.strip().lower()
+        reason = reason.strip()
         normalised_skill = _normalise_skill(skill)
 
         if normalised_skill not in verified_lookup:
@@ -163,13 +173,21 @@ def validate_low_coverage_priorities(response_data):
         if not isinstance(item, dict):
             raise AIPrioritisationUnavailable
 
-        skill = str(item.get('skill', '')).strip()
-        priority = str(item.get('priority', '')).strip().lower()
-        reason = str(item.get('reason', '')).strip()
-        normalised_skill = _normalise_skill(skill)
+        skill = item.get('skill')
+        priority = item.get('priority')
+        reason = item.get('reason')
 
-        if not skill or not reason:
+        if not isinstance(skill, str) or not skill.strip():
             raise AIPrioritisationUnavailable
+        if not isinstance(priority, str) or not priority.strip():
+            raise AIPrioritisationUnavailable
+        if not isinstance(reason, str) or not reason.strip():
+            raise AIPrioritisationUnavailable
+
+        skill = skill.strip()
+        priority = priority.strip().lower()
+        reason = reason.strip()
+        normalised_skill = _normalise_skill(skill)
 
         if priority not in ALLOWED_PRIORITIES:
             raise AIPrioritisationUnavailable

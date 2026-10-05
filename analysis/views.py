@@ -1,7 +1,15 @@
 import copy
+import hashlib
+import hmac
+import ipaddress
+import logging
+import os
+import time
 
 from django.contrib import messages
 from django.contrib.auth import login, logout
+from django.conf import settings
+from django.core.cache import cache
 from django.core import signing
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -34,6 +42,8 @@ ANALYSIS_STATE_ALL_RECOGNISED_SKILLS_MATCHED = 'all_recognised_skills_matched'
 ANALYSIS_STATE_NO_RECOGNISED_JD_SKILLS = 'no_recognised_jd_skills'
 ANALYSIS_MODE_STRUCTURED = 'structured'
 ANALYSIS_MODE_LOW_COVERAGE_AI = 'low_coverage_ai'
+AI_RATE_LIMITS = ((60, 3), (3600, 20))
+logger = logging.getLogger(__name__)
 
 STATUS_ORDER = {
     AnalysisRecord.STATUS_STARTED: 0,
@@ -41,6 +51,57 @@ STATUS_ORDER = {
     AnalysisRecord.STATUS_PRIORITIES_COMPLETED: 2,
     AnalysisRecord.STATUS_ROADMAP_COMPLETED: 3,
 }
+
+
+def _ai_rate_limit_source(request):
+    if request.user.is_authenticated:
+        return f'user:{request.user.pk}'
+
+    # Railway documents X-Real-IP as its client IP header. Trust it only when
+    # the process is running in Railway; elsewhere use the server-provided peer.
+    source_ip = (
+        request.META.get('HTTP_X_REAL_IP')
+        if os.environ.get('RAILWAY_ENVIRONMENT_ID')
+        else request.META.get('REMOTE_ADDR')
+    )
+    try:
+        return f'ip:{ipaddress.ip_address(source_ip)}'
+    except (TypeError, ValueError):
+        return None
+
+
+def _consume_ai_rate_limit(request, now=None):
+    """Reserve one AI request in both fixed windows, failing closed on errors."""
+    source = _ai_rate_limit_source(request)
+    if source is None:
+        logger.warning('AI request denied: category=rate_limit_identity_unavailable')
+        return False
+
+    identity = hmac.new(
+        settings.SECRET_KEY.encode(),
+        source.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    timestamp = time.time() if now is None else now
+
+    try:
+        for window_seconds, limit in AI_RATE_LIMITS:
+            window = int(timestamp // window_seconds)
+            key = f'fitgap:ai-rate:v1:{window_seconds}:{window}:{identity}'
+            if cache.add(key, 1, timeout=window_seconds + 1):
+                count = 1
+            else:
+                count = cache.incr(key)
+            if count > limit:
+                return False
+    except Exception as exc:
+        logger.warning(
+            'AI request denied: category=rate_limit_cache_error exception=%s',
+            exc.__class__.__name__,
+        )
+        return False
+
+    return True
 
 
 def _get_selected_language(request):
@@ -908,6 +969,11 @@ def ai_learning_roadmap_view(request):
         results['learning_roadmap_status'] = _build_roadmap_status('empty', text)
         return _render_ai_results(request, language, results, text)
 
+    if not _consume_ai_rate_limit(request):
+        results['learning_roadmap_status'] = _build_roadmap_status('fallback', text)
+        results['learning_roadmap_status']['message'] = text['ai_rate_limited']
+        return _render_ai_results(request, language, results, text)
+
     try:
         roadmap = generate_learning_roadmap(results, language)
     except LearningRoadmapUnavailable:
@@ -946,6 +1012,11 @@ def ai_prioritise_view(request):
             results['ai_prioritisation']['message'] = text['ai_low_coverage_unavailable']
             return _render_results(request, language, results, text)
 
+        if not _consume_ai_rate_limit(request):
+            results['ai_prioritisation'] = _build_ai_status('fallback', text)
+            results['ai_prioritisation']['message'] = text['ai_rate_limited']
+            return _render_results(request, language, results, text)
+
         try:
             priorities = prioritise_low_coverage_analysis(cv_text, job_description_text, language)
         except AIPrioritisationUnavailable:
@@ -965,6 +1036,11 @@ def ai_prioritise_view(request):
 
     if not missing_skill_details:
         results['ai_prioritisation'] = _build_ai_status('empty', text)
+        return _render_results(request, language, results, text)
+
+    if not _consume_ai_rate_limit(request):
+        results['ai_prioritisation'] = _build_ai_status('fallback', text)
+        results['ai_prioritisation']['message'] = text['ai_rate_limited']
         return _render_results(request, language, results, text)
 
     try:

@@ -268,6 +268,7 @@ TRANSLATIONS = {
         'ai_low_coverage_unavailable': (
             'AI-assisted low-coverage analysis is temporarily unavailable. You can still review the submitted analysis state above.'
         ),
+        'ai_rate_limited': 'You have made several AI requests recently. Please wait a little before trying again.',
         'ai_no_missing_skills': 'No missing skills were identified for AI prioritisation.',
         'ai_priority_high': 'HIGH PRIORITY',
         'ai_priority_medium': 'MEDIUM PRIORITY',
@@ -557,6 +558,7 @@ TRANSLATIONS = {
         'back_to_full_analysis': '← 返回完整分析结果',
         'ai_unavailable': 'AI 优先级分析暂时不可用，你仍可查看上方已识别的技能差距和证据。',
         'ai_low_coverage_unavailable': 'AI 辅助低覆盖分析暂时不可用，你仍可查看上方已提交文本的分析状态。',
+        'ai_rate_limited': '你最近已发起多次 AI 请求，请稍等片刻后再试。',
         'ai_no_missing_skills': '当前没有需要 AI 排序的缺失技能。',
         'ai_priority_high': '高优先级',
         'ai_priority_medium': '中优先级',

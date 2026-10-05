@@ -7,10 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
+from django.core.cache import cache
+from django.core import signing
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.staticfiles import finders
 from django.test import Client
-from django.test import SimpleTestCase, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
 from docx import Document
@@ -48,6 +51,7 @@ from .services import (
     generate_learning_recommendations,
 )
 from .translations import SUPPORTED_LANGUAGE_OPTIONS
+from .views import _ai_rate_limit_source, _consume_ai_rate_limit
 
 
 def _chat_response(content, finish_reason='stop'):
@@ -1029,6 +1033,21 @@ class AIPrioritisationServiceTests(SimpleTestCase):
         with self.assertRaises(AIPrioritisationUnavailable):
             validate_ai_priorities({'items': []}, ['Django'])
 
+    def test_validate_ai_priorities_requires_nonblank_string_fields(self):
+        valid_item = {'skill': 'Django', 'priority': 'high', 'reason': 'Required for backend work.'}
+        self.assertEqual(
+            validate_ai_priorities({'priorities': [valid_item]}, ['Django'])[0],
+            valid_item,
+        )
+
+        for field in ('skill', 'priority', 'reason'):
+            for invalid_value in (None, '', '   '):
+                with self.subTest(field=field, invalid_value=invalid_value):
+                    item = valid_item.copy()
+                    item[field] = invalid_value
+                    with self.assertRaises(AIPrioritisationUnavailable):
+                        validate_ai_priorities({'priorities': [item]}, ['Django'])
+
     def test_validate_low_coverage_priorities_accepts_candidate_priorities(self):
         priorities = validate_low_coverage_priorities({
             'priorities': [
@@ -1058,6 +1077,25 @@ class AIPrioritisationServiceTests(SimpleTestCase):
                     {'skill': 'conservation planning', 'priority': 'medium', 'reason': 'Duplicate.'},
                 ],
             })
+
+    def test_validate_low_coverage_priorities_requires_nonblank_string_fields(self):
+        valid_item = {
+            'skill': 'Conservation planning',
+            'priority': 'high',
+            'reason': 'Important for the target role.',
+        }
+        self.assertEqual(
+            validate_low_coverage_priorities({'priorities': [valid_item]})[0],
+            valid_item,
+        )
+
+        for field in ('skill', 'priority', 'reason'):
+            for invalid_value in (None, '', '   '):
+                with self.subTest(field=field, invalid_value=invalid_value):
+                    item = valid_item.copy()
+                    item[field] = invalid_value
+                    with self.assertRaises(AIPrioritisationUnavailable):
+                        validate_low_coverage_priorities({'priorities': [item]})
 
     @patch.dict(os.environ, {}, clear=True)
     def test_missing_deepseek_api_key_triggers_fallback_exception(self):
@@ -1575,6 +1613,21 @@ class LearningRoadmapServiceTests(SimpleTestCase):
         with self.assertRaises(LearningRoadmapUnavailable):
             validate_learning_roadmap({'summary': {}, 'skills': []}, ['Django'])
 
+    def test_validate_learning_roadmap_requires_nonblank_string_skill_fields(self):
+        roadmap = _sample_roadmap(['Django'])
+        self.assertEqual(validate_learning_roadmap(roadmap, ['Django'])['skills'][0]['skill'], 'Django')
+
+        for path in ('skill', 'immediate_next_action.skill'):
+            for invalid_value in (None, '', '   '):
+                with self.subTest(path=path, invalid_value=invalid_value):
+                    roadmap = _sample_roadmap(['Django'])
+                    if path == 'skill':
+                        roadmap['skills'][0]['skill'] = invalid_value
+                    else:
+                        roadmap['summary']['immediate_next_action']['skill'] = invalid_value
+                    with self.assertRaises(LearningRoadmapUnavailable):
+                        validate_learning_roadmap(roadmap, ['Django'])
+
     def test_validate_learning_roadmap_rejects_overlong_strategy(self):
         roadmap = _sample_roadmap(['Django'])
         roadmap['summary']['strategy'] = 'Too long. ' * 40
@@ -2027,7 +2080,140 @@ class DeepSeekBoundaryTests(SimpleTestCase):
                 self.assertTrue(transport.is_closed)
 
 
+class AIRateLimitTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.factory = RequestFactory()
+
+    def tearDown(self):
+        cache.clear()
+
+    def _anonymous_request(self, remote_addr='198.51.100.10', **headers):
+        request = self.factory.post('/', REMOTE_ADDR=remote_addr, **headers)
+        request.user = AnonymousUser()
+        return request
+
+    def _normal_results(self):
+        return {
+            'analysis_state': 'missing_skills_available',
+            'analysis_mode': 'structured',
+            'cv_skills': ['Python'],
+            'job_description_skills': ['Django'],
+            'matched_skills': [],
+            'missing_skills': ['Django'],
+            'missing_skill_details': [{
+                'skill': 'Django',
+                'cv_evidence': [],
+                'jd_evidence': [{'excerpt': 'Django is required.'}],
+            }],
+        }
+
+    def _low_coverage_results(self):
+        return {
+            'analysis_state': 'no_recognised_jd_skills',
+            'analysis_mode': 'low_coverage_ai',
+            'cv_skills': [],
+            'job_description_skills': [],
+            'matched_skills': [],
+            'missing_skills': [],
+            'missing_skill_details': [],
+            'low_coverage_source': {
+                'cv_text': 'Museum assistant experience.',
+                'job_description_text': 'Conservation planning role.',
+            },
+        }
+
+    def test_anonymous_identity_uses_server_peer_and_railway_real_ip_not_forwarded_for(self):
+        request = self._anonymous_request(
+            HTTP_X_FORWARDED_FOR='203.0.113.200',
+            HTTP_X_REAL_IP='203.0.113.201',
+        )
+        self.assertEqual(_ai_rate_limit_source(request), 'ip:198.51.100.10')
+
+        with patch.dict(os.environ, {'RAILWAY_ENVIRONMENT_ID': 'test-environment'}):
+            railway_request = self._anonymous_request(
+                HTTP_X_FORWARDED_FOR='203.0.113.200',
+                HTTP_X_REAL_IP='203.0.113.50',
+            )
+            self.assertEqual(_ai_rate_limit_source(railway_request), 'ip:203.0.113.50')
+
+    def test_authenticated_identity_uses_user_id_instead_of_ip(self):
+        user = get_user_model().objects.create_user(username='rate@example.com', password='StrongPass123!')
+        request = self.factory.post('/', REMOTE_ADDR='198.51.100.10')
+        request.user = user
+        self.assertEqual(_ai_rate_limit_source(request), f'user:{user.pk}')
+
+        request.META['REMOTE_ADDR'] = '203.0.113.10'
+        self.assertEqual(_ai_rate_limit_source(request), f'user:{user.pk}')
+
+    def test_minute_limit_allows_three_requests_and_denies_fourth(self):
+        request = self._anonymous_request()
+        self.assertEqual([_consume_ai_rate_limit(request, now=0) for _ in range(3)], [True, True, True])
+        self.assertFalse(_consume_ai_rate_limit(request, now=0))
+
+    def test_hour_limit_allows_twenty_requests_and_denies_twenty_first(self):
+        request = self._anonymous_request()
+        self.assertTrue(all(_consume_ai_rate_limit(request, now=index * 61) for index in range(20)))
+        self.assertFalse(_consume_ai_rate_limit(request, now=20 * 61))
+
+    def test_cache_error_fails_closed_without_logging_identity(self):
+        request = self._anonymous_request()
+        with patch('analysis.views.cache.add', side_effect=RuntimeError('private cache payload')):
+            with self.assertLogs('analysis.views', level='WARNING') as logs:
+                self.assertFalse(_consume_ai_rate_limit(request, now=0))
+
+        output = '\n'.join(logs.output)
+        self.assertIn('category=rate_limit_cache_error exception=RuntimeError', output)
+        self.assertNotIn('198.51.100.10', output)
+        self.assertNotIn('private cache payload', output)
+
+    def test_priority_limit_blocks_normal_and_low_coverage_before_ai_call(self):
+        cases = (
+            (self._normal_results(), 'analysis.views.prioritise_skill_gaps'),
+            (self._low_coverage_results(), 'analysis.views.prioritise_low_coverage_analysis'),
+        )
+        for results, service_path in cases:
+            with self.subTest(service_path=service_path), patch(
+                'analysis.views._consume_ai_rate_limit', return_value=False
+            ), patch(service_path) as mock_service:
+                response = self.client.post('/results/ai-prioritise/?lang=en', data={
+                    'analysis_payload': signing.dumps(results, compress=True),
+                    'output_language': 'en',
+                })
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(
+                    response,
+                    'You have made several AI requests recently. Please wait a little before trying again.',
+                )
+                mock_service.assert_not_called()
+
+    def test_roadmap_limit_blocks_before_ai_call_and_preserves_priorities(self):
+        user = get_user_model().objects.create_user(username='roadmap-rate@example.com', password='StrongPass123!')
+        self.client.force_login(user)
+        results = self._normal_results()
+        results['ai_prioritisation'] = {
+            'status': 'success',
+            'priorities': [{'skill': 'Django', 'priority': 'high', 'reason': 'Required.'}],
+        }
+
+        with patch('analysis.views._consume_ai_rate_limit', return_value=False), patch(
+            'analysis.views.generate_learning_roadmap'
+        ) as mock_roadmap:
+            response = self.client.post('/results/ai-learning-roadmap/?lang=zh', data={
+                'analysis_payload': signing.dumps(results, compress=True),
+                'output_language': 'zh',
+            })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '你最近已发起多次 AI 请求，请稍等片刻后再试。')
+        self.assertEqual(response.context['results']['ai_prioritisation']['status'], 'success')
+        mock_roadmap.assert_not_called()
+
+
 class InterfaceLanguageTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     def _create_user(self, email='student@example.com', password='StrongPass123!'):
         User = get_user_model()
         return User.objects.create_user(

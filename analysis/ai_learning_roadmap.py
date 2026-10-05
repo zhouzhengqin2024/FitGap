@@ -284,7 +284,8 @@ def validate_learning_roadmap(response_data, verified_priority_skills):
         if not isinstance(skill_item, dict):
             raise _fail(f'skills[{skill_index}] is not an object')
 
-        normalised_skill = _normalise_skill(skill_item.get('skill'))
+        skill = _require_text(skill_item.get('skill'), f'skills[{skill_index}].skill')
+        normalised_skill = _normalise_skill(skill)
         priority = _require_text(skill_item.get('priority'), f'skills[{skill_index}].priority').lower()
         stage = _require_text(skill_item.get('stage'), f'skills[{skill_index}].stage').lower()
 
@@ -386,7 +387,9 @@ def validate_learning_roadmap(response_data, verified_priority_skills):
     if not isinstance(immediate_next_action, dict):
         raise _fail('summary.immediate_next_action is missing or not an object')
 
-    immediate_skill = _normalise_skill(immediate_next_action.get('skill'))
+    immediate_skill = _normalise_skill(
+        _require_text(immediate_next_action.get('skill'), 'immediate_next_action.skill')
+    )
     if immediate_skill not in seen_skills:
         raise _fail('immediate_next_action.skill is not a validated roadmap skill')
 
